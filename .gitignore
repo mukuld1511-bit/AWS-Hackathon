@@ -1,36 +1,10 @@
-# Python / Byte-compiled / Cache
+# Python cache & virtual environments
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.ipynb_checkpoints/
-
-# Virtual Environments
+.venv/
 venv/
 env/
-.venv/
-ENV/
 
-# Data & Models (Keep large files out of Git)
-data/raw/
-data/processed/
-models/*.pt
-models/*.bin
-models/*.onnx
-models/*.tar.gz
-models/*.model
-*.zip
-*.tar
-*.gz
-
-# Submissions (track code, keep heavy submission files local except tracker CSV)
-submissions/*.csv
-!submissions/SUBMISSION_TRACKER.csv
-submissions/*.parquet
-
-# OS & IDE
+# System
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
-*.log
