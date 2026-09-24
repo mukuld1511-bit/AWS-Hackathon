@@ -11,21 +11,41 @@
 
 ---
 
-## 👥 2. Strategic Team Allocation
+## 👥 2. Strategic Technical Task Division
 
-### 🎯 Mukul (Lead / Core Engine)
-- **Focus:** Primary end-to-end ML pipeline, leak-free 5-Fold Cross-Validation, core GBDT & Transformer models.
-- **Responsibility:** Final model selection, ensemble integration, and official Unstop submissions.
+### 🎯 Mukul (Lead / Core Pipeline & Feature Re-ranker)
+- **Branch:** `main`
+- **Focus:** 
+  1. Build local validation split (100k S1 samples) with exact macro $F_{0.5}$ scorer.
+  2. Develop tabular feature engineering & primary GBDT (LightGBM) re-ranking model.
+  3. Optimize classification probability threshold specifically for $F_{0.5}$ precision.
+  4. Final model ensembling and portal submissions.
 
-### 🃏 Harsh & Prateek (Parallel Model Explorers / Alpha Boosters)
-- **Role:** Independent high-upside model experiments.
-- **Harsh:** Explores alternative model architectures (e.g., secondary transformer backbones, distinct embedding models).
-- **Prateek:** Focuses on dedicated modular experiments (e.g., specialized candidate retrieval, unique feature engineering sets).
-- **Strategy:** If your experiment outperforms or provides diverse predictions, we blend it with Mukul's core model for an instant leaderboard boost. If not, Mukul's core model keeps our rank secure.
+### ⚡ Harsh (Candidate Generation & Multi-Key Blocking)
+- **Branch:** `harsh`
+- **Focus:**
+  1. Expand candidate generation beyond exact names to capture misspelled entities and address-only matches.
+  2. Implement Multi-Key blocking:
+     - `(country, normalized_name)`
+     - `(country, zip/pin + name_prefix)`
+     - `(country, address_tokens)`
+  3. Ensure candidate pool per S1 entity stays between 15–25 candidates while maximizing recall.
+  4. Output clean `candidate_pairs.tsv` for downstream ranking.
 
-### 📝 Ayush (Documentation, EDA & Analysis)
-- **Role:** Competition documentation, EDA visualizations, and experiment tracking.
-- **Responsibility:** Continuously draft the **mandatory 1-2 page Approach Document** (Problem formulation, Blocking strategy, Architecture) required by Amazon for Top 100 shortlisting.
+### 🧠 Prateek (Multilingual Embeddings & Deep Matching)
+- **Branch:** `prateek`
+- **Focus:**
+  1. Handle transliterations and cross-lingual matches (Tamil, Hindi, English in Indian records).
+  2. Use a multilingual embedding model (`paraphrase-multilingual-MiniLM-L12-v2`) to compute semantic similarities.
+  3. Build a lightweight Cross-Encoder / pair-scorer to capture non-lexical semantic equivalence.
+  4. Feed similarity scores to Mukul for blending with the GBDT re-ranker.
+
+### 📝 Ayush (Documentation & Error Analysis)
+- **Branch:** `ayush`
+- **Focus:**
+  1. Fill the official `student_resource/Documentation_template.md` with problem formulation and architecture details.
+  2. Track false positives vs false negatives on validation sets.
+  3. Maintain final submission package readiness.
 
 ---
 

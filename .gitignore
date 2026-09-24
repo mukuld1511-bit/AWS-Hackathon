@@ -8,3 +8,12 @@ env/
 # System
 .DS_Store
 Thumbs.db
+
+# Large Datasets & Heavy Outputs
+student_resource/
+output/
+data/
+*.zip
+*.tsv
+*.csv
+!submissions/SUBMISSION_TRACKER.csv

@@ -1,92 +1,66 @@
 """
-Submission File Validator for Amazon ML Challenge 2026.
-CRITICAL: You only have 5 submissions per day. Never submit an unvalidated CSV!
+Optimized TSV Submission Checker for Amazon ML Challenge 2026.
+Strictly enforces all competition rules:
+1. Tab-separated format (.tsv).
+2. Exactly 1,732,544 rows matching test_source1.tsv.
+3. Proper singleton representation (empty string, no NaN, no null).
+4. S2/S3 ID validity and no S1 self-matches.
+5. Matching results must be a strict subset of candidate pairs.
 """
 import os
 import sys
-import pandas as pd
+import subprocess
 
-def validate_submission(
-    sub_path: str,
-    test_path: str,
-    id_col: str = None,
-    pred_col: str = None,
-    expected_rows: int = None
-) -> bool:
-    """
-    Validates the generated submission file against test set requirements:
-    1. File existence and non-empty size.
-    2. Correct number of rows matching test set.
-    3. No NaN / Null / Inf values.
-    4. Exact ID alignment and ordering with test.csv.
-    5. Correct columns present.
-    """
-    print("=" * 60)
-    print(f"[*] Validating submission file: {sub_path}")
-    print("=" * 60)
+def check_submission(
+    matching_path: str = "output/matching_results.tsv",
+    candidate_path: str = "output/candidate_pairs.tsv",
+    test_dir: str = "student_resource/dataset/test"
+):
+    print("=" * 70)
+    print("🔍 RUNNING STRICT SUBMISSION INTEGRITY CHECK (TSV OPTIMIZED)")
+    print("=" * 70)
 
-    if not os.path.exists(sub_path):
-        print(f"[FAIL] Submission file not found: {sub_path}")
-        return False
-
-    file_size_mb = os.path.getsize(sub_path) / (1024 * 1024)
-    print(f"[+] Submission file size: {file_size_mb:.2f} MB")
-
-    try:
-        sub_df = pd.read_csv(sub_path)
-    except Exception as e:
-        print(f"[FAIL] Unable to read submission CSV: {e}")
-        return False
-
-    print(f"[+] Loaded submission shape: {sub_df.shape}")
-    print(f"[+] Columns: {list(sub_df.columns)}")
-
-    # Check against test file if provided
-    if test_path and os.path.exists(test_path):
-        test_df = pd.read_csv(test_path)
-        expected_rows = len(test_df)
-        print(f"[+] Test set detected with {expected_rows} rows.")
-
-        if id_col is None:
-            # Guess common ID column names
-            for col in ['id', 'sample_id', 'product_id', 'query_id', 'ID', 'entity_id']:
-                if col in test_df.columns and col in sub_df.columns:
-                    id_col = col
-                    break
-
-        if id_col and id_col in test_df.columns and id_col in sub_df.columns:
-            if not (test_df[id_col].values == sub_df[id_col].values).all():
-                print(f"[FAIL] IDs in submission do NOT exactly match test set ID sequence!")
-                return False
-            print(f"[PASS] ID alignment verified on column '{id_col}'.")
-
-    if expected_rows is not None:
-        if len(sub_df) != expected_rows:
-            print(f"[FAIL] Row count mismatch! Expected: {expected_rows}, Found: {len(sub_df)}")
+    # 1. Existence check
+    for p, name in [(matching_path, "Matching Results"), (candidate_path, "Candidate Pairs")]:
+        if not os.path.exists(p):
+            print(f"❌ [FAIL] Missing file: {name} at {p}")
             return False
-        print(f"[PASS] Row count matches perfectly ({len(sub_df)} rows).")
+        size_mb = os.path.getsize(p) / (1024 * 1024)
+        print(f"✅ Found {name}: {size_mb:.2f} MB")
 
-    # Check for NaN / Null values
-    nan_counts = sub_df.isna().sum()
-    if nan_counts.any():
-        print("[FAIL] Missing/NaN values detected:")
-        print(nan_counts[nan_counts > 0])
+    # 2. Run official student_resource validator script
+    validator_script = os.path.join("student_resource", "utils", "validate_submission.py")
+    if not os.path.exists(validator_script):
+        print(f"❌ [FAIL] Official validator script not found at {validator_script}")
         return False
-    print("[PASS] Zero NaN / Null values detected.")
 
-    print("\n[Preview of First 5 Rows]:")
-    print(sub_df.head())
-    print("\n[Preview of Last 5 Rows]:")
-    print(sub_df.tail())
-    print("\n" + "=" * 60)
-    print("[SUCCESS] ALL VALIDATION CHECKS PASSED! Ready for Unstop submission.")
-    print("=" * 60)
-    return True
+    print("\n[*] Invoking official competition validator...")
+    cmd = [
+        sys.executable,
+        validator_script,
+        "--matching", matching_path,
+        "--candidate", candidate_path,
+        "--test-dir", test_dir
+    ]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    print(proc.stdout)
+    if proc.stderr:
+        print(proc.stderr)
+
+    if proc.returncode == 0:
+        print("=" * 70)
+        print("🎉 [PERFECT PASS] ALL RULES SATISFIED! SAFE TO SUBMIT TO UNSTOP.")
+        print("=" * 70)
+        return True
+    else:
+        print("=" * 70)
+        print("❌ [VALIDATION FAILED] DO NOT SUBMIT. Fix the errors listed above.")
+        print("=" * 70)
+        return False
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python src/submission_checker.py <path_to_submission.csv> [<path_to_test.csv>]")
-    else:
-        s_path = sys.argv[1]
-        t_path = sys.argv[2] if len(sys.argv) > 2 else None
-        validate_submission(s_path, t_path)
+    m_path = sys.argv[1] if len(sys.argv) > 1 else "output/matching_results.tsv"
+    c_path = sys.argv[2] if len(sys.argv) > 2 else "output/candidate_pairs.tsv"
+    t_dir = sys.argv[3] if len(sys.argv) > 3 else "student_resource/dataset/test"
+    check_submission(m_path, c_path, t_dir)
