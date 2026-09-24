@@ -1,0 +1,2 @@
+sub_id,date,member,model_name,cv_metric,cv_score,public_lb_score,blocking_strategy,reranker_features,notes
+sub_01,2026-09-25,Member1,baseline_tfidf_bm25,F1,0.0000,0.0000,BM25 top-20,Cosine sim,First pipeline smoke test
