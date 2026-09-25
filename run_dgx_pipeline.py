@@ -143,12 +143,12 @@ def main():
                         best_s3_score = score
                         best_s3 = cid
             
-            # HIGH PRECISION THRESHOLD: Only accept if match score >= 75%
+            # HIGH PRECISION THRESHOLD: Only accept if match score >= 85%
             # Low scores are rejected as Singletons (Scores 1.0 in Macro F0.5)
             final_matches = []
-            if best_s2 and best_s2_score >= 75.0:
+            if best_s2 and best_s2_score >= 85.0:
                 final_matches.append(best_s2)
-            if best_s3 and best_s3_score >= 75.0:
+            if best_s3 and best_s3_score >= 85.0:
                 final_matches.append(best_s3)
                 
             if final_matches:

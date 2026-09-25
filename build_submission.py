@@ -2,7 +2,7 @@
 import os
 import shutil
 
-REPO = r"D:\AWS-Hackathon"
+REPO = os.getcwd()
 STAGING = os.path.join(REPO, "submission_staging")
 ZIP_NAME = "team_submission"
 

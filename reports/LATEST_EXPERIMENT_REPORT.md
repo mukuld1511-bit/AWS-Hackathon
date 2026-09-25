@@ -17,4 +17,11 @@
 
 ---
 
+### Run 2: Precision Capping Threshold 85.0
+- **Status:** Pipeline executing locally with stricter acceptance criteria (85.0 threshold).
+- **Goal:** Reduce false-positives significantly to boost F_0.5 score.
+- **Score (Unstop LB):** TBD (Pending evaluation)
+
+---
+
 *(DGX updates will be pushed here and synced automatically to Local PC)*
