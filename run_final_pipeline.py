@@ -54,7 +54,7 @@ else:
     N_FEATURES = 6
     print("[!] xgb_reranker_v2.json not found, falling back to v1 (6 features)")
 
-XGB_THRESHOLD = 0.99
+XGB_THRESHOLD = 0.65
 MAX_CANDIDATES = 10
 BATCH_SIZE = 5000
 
@@ -177,15 +177,24 @@ def main():
             nonlocal total_s1, matched_count, ml_boost_count, xgb_match_count, total_cands
 
             feature_matrix = []
-            cand_refs = []  # (batch_idx, cid)
+            cand_refs = []  # (batch_idx, cid, is_conflict)
 
             for b_idx, row in enumerate(batch_rows):
                 s1_id = row[0].strip()
                 s1_name = clean_name(row[1].strip() if len(row) > 1 else "")
                 s1_addr = row[2].strip() if len(row) > 2 else ""
+                s1_country = row[3].strip().lower() if len(row) > 3 else ""
+                s1_geo = extract_geo(s1_addr, s1_country)
 
                 # === Candidate Generation (Tight Blocker) ===
                 candidates = get_candidates(row, idx, MAX_CANDIDATES)
+
+                # Auto-align: ensure all multilingual matches are in candidate_pairs.tsv
+                if s1_id in ml_matches:
+                    for mid in ml_matches[s1_id]:
+                        if mid not in candidates:
+                            candidates.append(mid)
+
                 total_cands += len(candidates)
                 total_s1 += 1
 
@@ -193,10 +202,11 @@ def main():
 
                 for cid in candidates:
                     if cid not in records: continue
-                    t_cn, t_addr, _, _ = records[cid]
+                    t_cn, t_addr, t_country, t_geo = records[cid]
                     feats = extract_features(s1_name, s1_addr, t_cn, t_addr, N_FEATURES)
                     feature_matrix.append(feats)
-                    cand_refs.append((b_idx, cid))
+                    is_conflict = (s1_geo and t_geo and s1_geo != t_geo)
+                    cand_refs.append((b_idx, cid, is_conflict))
 
             if not feature_matrix:
                 for row in batch_rows:
@@ -214,7 +224,10 @@ def main():
             best_s3_score = [0.0] * len(batch_rows)
 
             for i, prob in enumerate(probs):
-                b_idx, cid = cand_refs[i]
+                b_idx, cid, is_conflict = cand_refs[i]
+                if is_conflict:
+                    prob = 0.0
+
                 if cid.startswith("S2-"):
                     if prob > best_s2_score[b_idx]:
                         best_s2_score[b_idx] = prob
@@ -284,7 +297,7 @@ def main():
 
     # Run validator
     print("\n[*] Validating submission file...")
-    os.system(f"python3 student_resource/utils/validate_submission.py {OUTPUT_DIR}/matching_results.tsv")
+    os.system(f"python3 student_resource/utils/validate_submission.py --matching {OUTPUT_DIR}/matching_results.tsv --candidate {OUTPUT_DIR}/candidate_pairs.tsv --test-dir student_resource/dataset/test")
 
     # Copy to sub5_output for easy upload
     print("\n[*] Copying to sub5_output/ for upload...")

@@ -48,9 +48,10 @@ LEGAL_SUFFIXES = re.compile(
     r'\b(inc|incorporated|llc|llp|ltd|limited|pvt|private|corp|corporation|'
     r'co|company|enterprises|enterprise|group|services|service|center|'
     r'solutions|associates|consulting|consultants|technologies|tech|'
-    r'sa|sarl|sas|sasu|eurl|gmbh|international|india|trading|agency|'
-    r'works|auto|general|medical|industries|industry|brothers|sons|'
-    r'brothers|traders|trader|dealer|dealers|store|stores)\b',
+    r'sa|sarl|sas|sasu|eurl|ei|snc|sci|gie|gmbh|international|india|trading|agency|'
+    r'works|auto|general|medical|industries|industry|brothers|sons|fils|'
+    r'traders|trader|dealer|dealers|store|stores|association|societe|société|'
+    r'comite|comité|ecole|école|clinique|maison)\b',
     re.IGNORECASE
 )
 PUNCT = re.compile(r'[^\w\s]', re.UNICODE)
@@ -64,25 +65,54 @@ US_STATES = {
     'RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'
 }
 
-# Top Indian cities/states (by frequency in dataset)
+# Top Indian cities/states/districts
 INDIA_GEO = {
-    'delhi','mumbai','maharashtra','karnataka','bangalore','bengaluru',
-    'pune','hyderabad','telangana','gujarat','rajasthan','kolkata',
-    'bengal','chennai','ahmedabad','kerala','andhra','uttar','madhya',
-    'bihar','odisha','punjab','haryana','chandigarh','jaipur','lucknow',
-    'nagpur','indore','bhopal','patna','vadodara','coimbatore','agra',
-    'meerut','nashik','noida','gurgaon','gurugram','faridabad','surat',
-    'thane','navi','visakhapatnam','vijayawada','mysore','mysuru',
-    'mangalore','mangaluru','kochi','thiruvananthapuram','calicut',
-    'kozhikode','madurai','tiruchirappalli','trichy','salem','erode'
+    # States
+    'andhra','arunachal','assam','bihar','chhattisgarh','goa','gujarat','haryana',
+    'himachal','jharkhand','karnataka','kerala','madhya','maharashtra','manipur',
+    'meghalaya','mizoram','nagaland','odisha','orissa','punjab','rajasthan','sikkim',
+    'tamil','nadu','telangana','tripura','uttar','pradesh','uttarakhand','bengal',
+    'delhi','chandigarh','pondicherry','puducherry','ladakh','kashmir',
+    # Cities & Districts
+    'mumbai','delhi','bangalore','bengaluru','hyderabad','ahmedabad','chennai','kolkata',
+    'surat','pune','jaipur','lucknow','kanpur','nagpur','indore','thane','bhopal',
+    'visakhapatnam','vizag','patna','vadodara','baroda','ghaziabad','ludhiana','agra',
+    'nashik','faridabad','meerut','rajkot','varanasi','srinagar','aurangabad','dhanbad',
+    'amritsar','navi','allahabad','prayagraj','ranchi','howrah','coimbatore','jabalpur',
+    'gwalior','vijayawada','jodhpur','madurai','raipur','kota','guwahati','chandigarh',
+    'solapur','hubli','dharwad','bareilly','moradabad','mysore','mysuru','gurgaon','gurugram',
+    'aligarh','jalandhar','tiruchirappalli','trichy','bhubaneswar','salem','warangal',
+    'mira','bhayandar','thiruvananthapuram','trivandrum','bhiwandi','saharanpur','gorakhpur',
+    'guntur','bikaner','amravati','noida','jamshedpur','bhilai','cuttack','firozabad',
+    'kochi','cochin','nellore','bhavnagar','dehradun','durgapur','asansol','rourkela',
+    'nanded','kolhapur','ajmer','akola','gulbarga','kalaburagi','jamnagar','ujjain',
+    'loni','siliguri','jhansi','ulhasnagar','jammu','sangli','mangalore','mangaluru',
+    'erode','belgaum','belagavi','ambattur','tirunelveli','malegaon','gaya','udaipur',
+    'kakinada','davanagere','kozhikode','calicut','rajahmundry','bokaro','bellary',
+    'patiala','agartala','bhagalpur','muzaffarnagar','latur','dhule','tirupati','rohtak',
+    'korba','bhilwara','berhampur','muzaffarpur','ahmednagar','mathura','kollam',
+    'avadi','kadapa','bilaspur','satara','bijapur','vijayapura','shivamogga','shimoga',
+    'chandrapur','junagadh','ambala','karauli','mirzapur','abohar','khordha'
 }
 
-# French regions
-FRANCE_REGIONS = {
-    'auvergne','bretagne','bourgogne','normandie','occitanie',
-    'aquitaine','alsace','lorraine','champagne','picardie',
-    'languedoc','roussillon','provence','alsace','limousin',
-    'poitou','charentes','franche','comté','île','hauts'
+# French regions & Top 60 French Cities
+FRANCE_GEO = {
+    # Regions
+    'auvergne','rhone','alpes','bretagne','bourgogne','normandie','occitanie',
+    'aquitaine','nouvelle','alsace','lorraine','champagne','ardenne','picardie',
+    'languedoc','roussillon','provence','cote','dazur','limousin',
+    'poitou','charentes','franche','comte','ile','france','hauts','loire','centre',
+    'corse',
+    # Cities
+    'paris','marseille','lyon','toulouse','nice','nantes','montpellier','strasbourg',
+    'bordeaux','lille','rennes','reims','toulon','etienne','havre',
+    'grenoble','dijon','angers','nimes','villeurbanne','clermont','ferrand','mans',
+    'aix','brest','tours','amiens','limoges','annecy','perpignan',
+    'boulogne','billancourt','metz','besancon','orleans','argenteuil',
+    'rouen','montreuil','mulhouse','caen','nancy','tourcoing','roubaix','nanterre',
+    'vitry','seine','avignon','creteil','dunkerque','poitiers','asnieres','versailles',
+    'colombes','nazaire','herblain','teste','buch',
+    'aubervilliers','aulnay','courbevoie','cherbourg','calais','rochelle','beziers'
 }
 
 
@@ -111,7 +141,7 @@ def extract_geo(addr: str, country: str) -> str:
 
     elif country == "france":
         tokens = set(re.findall(r'[a-z]+', addr_lower))
-        for geo in FRANCE_REGIONS:
+        for geo in FRANCE_GEO:
             if geo in tokens:
                 return geo
 
