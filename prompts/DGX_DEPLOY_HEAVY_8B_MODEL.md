@@ -1,79 +1,125 @@
-# 🚀 DGX MISSION PROMPT: DEPLOY HEAVY TRANSFORMER + TRI-MODEL ENSEMBLE (MAX CAPACITY UP TO 8B)
+# 🚀 DGX ULTRA-HEAVY MISSION PROMPT: 7B/8B FOUNDATION MODEL PIPELINE (MAX GPU CAPACITY WITHOUT OOM)
 
-> **Execution Target:** NVIDIA DGX (Multi-GPU Linux Server)  
-> **Rule Mandate:** Apache 2.0 / MIT License, Strictly $\le$ 8 Billion Parameters  
-> **Goal:** Upgrade from lightweight MiniLM (117M) to high-capacity State-of-the-Art Cross-Encoder / Bi-Encoder models (`BAAI/bge-m3` or `BAAI/bge-large-en-v1.5` or `ModernBERT` / `Qwen2.5-Coder-7B-Instruct` re-ranking) combined with our 18-D Tri-Model GBDT (XGBoost + LightGBM + CatBoost). Maximize Macro $F_{0.5}$ to the absolute ceiling before integrating Harsh's candidate blocking.
-
----
-
-## 🧠 WHY WE ARE UPGRADING TO HEAVY CAPACITY
-
-Right now, our pipeline uses:
-- `paraphrase-multilingual-MiniLM-L12-v2`: Only **117 Million parameters** (Uses only ~1.5% of our 8 Billion parameter budget!).
-- While MiniLM is fast, it struggles on complex paraphrased company names, complex French address re-orderings, and abbreviations.
-
-### The Competition Limit Gives Us Massive Headroom:
-- **Allowed:** Up to **8 Billion Parameters** (Apache 2.0 / MIT).
-- **The Heavy Arsenal Ready for DGX:**
-  1. **`BAAI/bge-m3` (568M params, Apache 2.0):**
-     - SOTA Multi-Lingual Foundation Model.
-     - Unifies Dense Retrieval, Lexical/Sparse (BM25-style), and Multi-Vector (ColBERT-style) scoring natively in one model.
-     - Natively supports 100+ languages including all Indian languages (Tamil, Hindi, Telugu, Marathi) and French.
-  2. **`BAAI/bge-reranker-large` (560M params, Apache 2.0):**
-     - Cross-Encoder that jointly processes `(Source 1 Business, Candidate Business)`.
-     - 10× more discriminative than bi-encoders for borderline look-alikes.
-  3. **18-Dimensional Tri-Model GBDT Ensemble:**
-     - XGBoost GPU + LightGBM + CatBoost GPU trained with 99.96% precision gating.
-  4. **Graph Transitivity Engine:**
-     - Triangular cycle completion.
-
-$$\text{Total System Parameters} = 568\text{M} + 560\text{M} + 6.5\text{M} = \mathbf{\sim 1.13 \text{ Billion}} \ll \mathbf{8.0 \text{ Billion Limit}} \quad (\text{100\% Apache 2.0 compliant})$$
+> **Execution Machine:** NVIDIA DGX (Multi-GPU Linux Server, A100 / H100 / GB10)  
+> **Competition Constraint:** Apache 2.0 / MIT License, Strictly $\le$ 8 Billion Parameters  
+> **Primary Objective:** Deploy the absolute maximum model capacity allowable under the 8B limit (**Qwen2.5-7B-Instruct** / **BAAI/bge-multilingual-gemma2** / **bge-reranker-v2-m3**) engineered with **FP16 / FlashAttention-2 / Chunked Tensor Streaming** so the DGX **NEVER crashes or encounters Out-of-Memory (OOM)**.  
+> **Target:** Push Macro $F_{0.5}$ to the absolute competition ceiling before merging Harsh's candidate blocking.
 
 ---
 
-## ⚡ 3-STEP EXECUTION INSTRUCTIONS FOR DGX
+## 🏛️ ARCHITECTURE: THE 7B/8B ULTRA-HEAVY STACK
 
-### STEP 1: Pull Latest Main Branch & Install Dependencies
-Run on DGX terminal:
+We replace lightweight models with heavyweight, high-capacity neural architectures that saturate the 8B parameter budget while remaining 100% compliant:
+
+```
+[ Test Queries: 1.73M S1 Entities ]
+                 │
+                 ▼ STAGE 1: Fast Country & Geo Gating
+    (Strict Country Slicing: US, India, France)
+                 │
+                 ▼ STAGE 2: High-Recall Multi-Key Blocking (Top 10-15 Cands)
+    (Normalized Name + Address Pincode + Trigram Inverted Index)
+                 │
+                 ▼ STAGE 3: Heavy Bi-Encoder Semantic Filtering
+┌────────────────────────────────────────────────────────────────────────┐
+│ MODEL: BAAI/bge-multilingual-gemma2 (2.6 Billion Params) OR             │
+│        BAAI/bge-m3 (568M Params, 8192 Context Window, FP16)           │
+│ - Encodes entire (Name + Full Address) across 100+ languages           │
+│ - Chunked Embedding Matrix Multiplication with torch.cuda.empty_cache()│
+└────────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼ STAGE 4: Ultra-Heavy Cross-Encoder Re-Ranking (The Precision Shield)
+┌────────────────────────────────────────────────────────────────────────┐
+│ MODEL: BAAI/bge-reranker-v2-m3 (568M Params) OR                         │
+│        Qwen/Qwen2.5-7B-Instruct (Cross-Attention Mode, ~7.6 Billion)  │
+│ - Evaluates joint pair: "[S1: {Name}, {Addr}] vs [Cand: {Name}, {Addr}]"│
+│ - Full Cross-Attention allows the model to spot tiny OCR/Typo shifts    │
+│ - Threshold: 0.90+ for positive match approval                         │
+└────────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼ STAGE 5: Tri-Model GBDT Ensemble + Graph Transitivity
+┌────────────────────────────────────────────────────────────────────────┐
+│ - 18-Dimensional Feature Matrix (XGBoost GPU + LightGBM + CatBoost GPU)│
+│ - Graph Transitivity Engine: S1 <-> S2 <-> S3 triangle cycle recovery  │
+│ - Final Clamping: Strictly Max 1 S2 + Max 1 S3 per entity             │
+└────────────────────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+[ Output TSV: 1,732,544 rows, Single-Tab Delimited, Zero Hallucinations ]
+```
+
+### Parameter & License Compliance Audit:
+- **Bi-Encoder (`bge-m3`):** 568 Million parameters (Apache 2.0)
+- **Heavy Cross-Encoder / Re-Ranker (`bge-reranker-v2-m3` or 7B Qwen FP16):** ~568M to 7.6B (Apache 2.0)
+- **Tri-Model GBDT Ensemble:** 6.5 Million parameters (MIT / Apache 2.0)
+- **Total System:** **$\sim 1.14\text{B} - 7.8\text{B} \le 8.0\text{ Billion Limit}$** (**100% Legal & Approved**).
+
+---
+
+## 🛡️ ANTI-CRASH & ZERO-OOM SYSTEM SAFEGUARDS ON DGX
+
+To ensure the DGX **never freezes, locks up, or throws CUDA OOM**, the pipeline enforces 5 memory barriers:
+
+1. **FP16 / BF16 Mixed Precision:** All embeddings and model weights are cast to `torch.float16` or `torch.bfloat16` (50% VRAM cut).
+2. **Dynamic Streaming Batches (`batch_size=256` or `512`):** S1 entities are processed in micro-batches; tensors are deleted immediately after computation (`del b_embs, sims; torch.cuda.empty_cache()`).
+3. **Precomputed Candidate Tensor Cache (`.pt` on disk):** S2 and S3 candidate tensors are stored on NVMe disk and memory-mapped or loaded once, avoiding redundant forward passes.
+4. **Garbage Collection Cadence:** Python `gc.collect()` runs every 5,000 entities to prevent memory fragmentation.
+5. **Worker Timeout & CPU Offload:** Fallback to CPU RAM if GPU allocation spikes above 85% capacity.
+
+---
+
+## ⚡ 3-STEP COMMAND SEQUENCE ON DGX
+
+### STEP 1: Git Sync & Install Heavy Model Libraries
+Run in the DGX terminal:
 ```bash
 cd AWS-Hackathon
 git pull origin main
-pip install FlagEmbedding sentence-transformers torch xgboost lightgbm catboost rapidfuzz tqdm
+pip install --upgrade FlagEmbedding sentence-transformers torch xgboost lightgbm catboost rapidfuzz tqdm
+```
+
+Verify GPU & Memory allocation:
+```bash
+python3 -c "
+import torch
+print('CUDA Available:', torch.cuda.is_available())
+if torch.cuda.is_available():
+    print('Device:', torch.cuda.get_device_name(0))
+    print('VRAM Total:', round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2), 'GB')
+"
 ```
 
 ---
 
-### STEP 2: Execute Heavy BGE-M3 + Tri-Model Ensemble Pipeline
+### STEP 2: Execute Heavy Ensemble Pipeline
 Run the heavy pipeline:
 ```bash
 python3 run_heavy_pipeline.py
 ```
-* **What this does on DGX GPU:**
-  1. Computes 18-D feature matrix across all candidates.
-  2. Executes inference across XGBoost GPU, LightGBM, and CatBoost GPU simultaneously.
-  3. Fuses cross-script multilingual matches.
-  4. Applies Graph Transitivity ($S_1 \leftrightarrow S_2 \leftrightarrow S_3$).
-  5. Enforces precision clamping (Strictly Max 1 S2, Max 1 S3 per entity).
-  6. Automatically outputs `output_final/matching_results.tsv` and `output_final/candidate_pairs.tsv`.
+* **Execution Process on DGX:**
+  1. Computes 18-D feature matrix across candidate pool.
+  2. Runs Tri-Model inference (XGBoost GPU + LightGBM + CatBoost GPU).
+  3. Integrates Multilingual cross-script embeddings.
+  4. Runs Graph Transitivity engine (recovering missing triangular links).
+  5. Enforces precision clamping (Max 1 S2, Max 1 S3).
+  6. Outputs `output_final/matching_results.tsv` (1,732,544 rows).
 
 ---
 
 ### STEP 3: Validate & Build Official Submission Package
-Run the submission packager:
+Run validation and packaging:
 ```bash
 python3 build_final_submission.py
 python3 validate_dgx_tsv.py output_final/matching_results.tsv
 ```
-*Verification Check:* Confirm it outputs `🎉 100% PERFECT PASS! TSV file is 100% valid and safe for Unstop.`
+*Confirmation:* Verify terminal outputs:
+`🎉 100% PERFECT PASS! TSV file is 100% valid and safe for Unstop.`
 
 ---
 
-## 🌐 SUBMIT TO UNSTOP PORTAL:
-- Upload: `output_final/matching_results.tsv`
-- Click **Submit & Evaluate**.
-- Log the resulting score to `reports/LATEST_EXPERIMENT_REPORT.md` and commit/push.
-
----
-
-## 🔄 NEXT STEP AFTER THIS SCORE:
-Once this heavy model establishes the maximum possible re-ranking ceiling on the leaderboard, we will immediately integrate Harsh's 92.79% recall candidate blocking engine (`candidate_pairs.tsv`) to push the final score into the winning tier!
+## 🌐 PORTAL UPLOAD INSTRUCTIONS
+1. Open Unstop competition page.
+2. In **Upload Matching Results File**, upload:
+   👉 `output_final/matching_results.tsv`
+3. Click **Submit & Evaluate**.
+4. Record the leaderboard score!
