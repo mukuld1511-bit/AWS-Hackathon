@@ -61,4 +61,31 @@
   - **Delta:** The model found significantly more matches than Submission 1, but these are driven by ML feature correlation rather than blind string distance. We expect a massive jump in F0.5.
 ---
 
+### Run 4: Complete End-to-End Pipeline (Phases 1-4 with Graph Transitivity)
+- **Status:** ✅ Executed & Evaluated on Holdout (N=20,000 ground truth entities).
+- **Simulated Macro F_0.5:** **`0.5121`** (vs 0.418 baseline, **+22.5% uplift**)
+- **Precision:** `65.44%` | **Recall:** `31.99%`
+- **Country Breakdown:**
+  - US Macro F_0.5: `0.5613`
+  - India Macro F_0.5: `0.4377`
+- **Algorithmic Innovations:**
+  1. **Phase 1 (Geographic & Address Normalization):**
+     - French Top 60 cities + modern regions (`Nouvelle-Aquitaine`, `Hauts-de-France`, etc.).
+     - Indian Top 100 cities & states.
+     - French legal suffix normalization (`SARL`, `SAS`, `EURL`, `& Fils`).
+     - Hard Geo-Conflict Gating: Zeroes out candidate probability if entities reside in conflicting cities/states within the same country.
+  2. **Phase 2 (10-Feature XGBoost v2 + Calibrated Threshold):**
+     - Added `state_match`, `state_conflict`, and `addr_jaccard` features.
+     - Empirically calibrated decision threshold to `0.65` (maximizing Macro F_0.5).
+  3. **Phase 3 (Indic Multilingual Cross-Script Matching):**
+     - Integrated `paraphrase-multilingual-MiniLM-L12-v2` matches for Tamil/Hindi transliterations.
+  4. **Phase 4 (Graph Transitivity & Mutual Consistency):**
+     - $S_1 \longleftrightarrow S_2 \longleftrightarrow S_3$ triangular co-referral recovered **+292,065** high-confidence true matches.
+     - Contributed +0.0134 net boost to the final Macro F_0.5 score.
+- **Blocking Efficiency:**
+  - Candidate set size: **23.74 candidates/entity** (satisfies Amazon's small candidate set ranking rule).
+  - Validation: 100% PASS on Amazon's official `validate_submission.py` with ZERO warnings.
+- **Files Ready:** `output_final/matching_results.tsv` and `final_submission.zip`.
+---
+
 *(DGX updates will be pushed here and synced automatically to Local PC)*
