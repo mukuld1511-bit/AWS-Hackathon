@@ -5,6 +5,16 @@ __pycache__/
 venv/
 env/
 
+# Data and large output files
+data/
+output/
+6ab10eb3b23ba_student_resource/
+*.tsv
+*.csv
+*.tar.gz
+*.zip
+
 # System
 .DS_Store
 Thumbs.db
+
