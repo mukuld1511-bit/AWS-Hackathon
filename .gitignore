@@ -22,3 +22,7 @@ data/
 !reports/
 !reports/*.md
 !reports/*.json
+
+# Large model binaries and caches
+*.pkl
+catboost_info/

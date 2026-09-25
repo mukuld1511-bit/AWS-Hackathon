@@ -10,12 +10,13 @@ print("[1/5] Cleaning up staging directory...")
 if os.path.exists(STAGING):
     shutil.rmtree(STAGING)
 
-# 1. output/ — both TSV files
+# 1. output/ — both TSV files from output_final/
 print("[2/5] Copying TSV output files...")
 out_dir = os.path.join(STAGING, 'output')
 os.makedirs(out_dir, exist_ok=True)
-shutil.copy2(os.path.join(REPO, 'output', 'matching_results.tsv'), out_dir)
-shutil.copy2(os.path.join(REPO, 'output', 'candidate_pairs.tsv'), out_dir)
+src_output_dir = os.path.join(REPO, 'output_final') if os.path.exists(os.path.join(REPO, 'output_final')) else os.path.join(REPO, 'output')
+shutil.copy2(os.path.join(src_output_dir, 'matching_results.tsv'), out_dir)
+shutil.copy2(os.path.join(src_output_dir, 'candidate_pairs.tsv'), out_dir)
 
 # 2. code/business_entity_resolution/src/
 print("[3/5] Packaging reproduction code...")
@@ -27,8 +28,10 @@ for f in os.listdir(os.path.join(REPO, 'src')):
     if f.endswith('.py'):
         shutil.copy2(os.path.join(REPO, 'src', f), src_dir)
 
-if os.path.exists(os.path.join(REPO, 'xgb_reranker.json')):
-    shutil.copy2(os.path.join(REPO, 'xgb_reranker.json'), code_dir)
+for mf in ['xgb_heavy.json', 'lgb_heavy.txt', 'cat_heavy.cbm', 'xgb_reranker_v2.json', 'xgb_reranker.json']:
+    p = os.path.join(REPO, mf)
+    if os.path.exists(p):
+        shutil.copy2(p, code_dir)
 
 with open(os.path.join(code_dir, 'README.md'), 'w', encoding='utf-8') as fh:
     fh.write('''# Business Entity Resolution — Solution Reproduction Guide

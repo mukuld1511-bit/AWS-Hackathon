@@ -3,5 +3,9 @@ numpy
 scikit-learn
 lightgbm
 xgboost
+catboost
+sentence-transformers
+rapidfuzz
+torch
 tqdm
 matplotlib
