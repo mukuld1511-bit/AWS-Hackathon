@@ -266,6 +266,34 @@ def main():
             best_thresh = thresh
 
     print("\n" + "=" * 75)
+    print("🎯 MULTI-MATCH EXPERIMENTS (Allowing Multiple Valid S2/S3 Matches)")
+    print("=" * 75)
+    for high_thresh in [0.70, 0.75, 0.80, 0.85, 0.90]:
+        preds_multi = {}
+        for s1_id in gt:
+            # Keep primary match >= 0.65, allow additional matches if >= high_thresh
+            s2_cands = sorted([(c, p) for c, p in scored_candidates.get(s1_id, []) if c.startswith("S2-")], key=lambda x: x[1], reverse=True)
+            s3_cands = sorted([(c, p) for c, p in scored_candidates.get(s1_id, []) if c.startswith("S3-")], key=lambda x: x[1], reverse=True)
+            
+            p_set = set()
+            for idx_c, (c, p) in enumerate(s2_cands):
+                if idx_c == 0 and p >= 0.65:
+                    p_set.add(c)
+                elif idx_c > 0 and p >= high_thresh:
+                    p_set.add(c)
+
+            for idx_c, (c, p) in enumerate(s3_cands):
+                if idx_c == 0 and p >= 0.65:
+                    p_set.add(c)
+                elif idx_c > 0 and p >= high_thresh:
+                    p_set.add(c)
+
+            preds_multi[s1_id] = p_set
+
+        f05_m, prec_m, rec_m, _ = evaluate_predictions(gt, preds_multi, s1_countries)
+        print(f"Multi-Match (Secondary Thresh = {high_thresh:.2f}) -> F0.5: {f05_m:.4f} | Prec: {prec_m:.4f} | Rec: {rec_m:.4f}")
+
+    print("\n" + "=" * 75)
     print(f"🏆 BEST MACRO F_0.5 SCORE: {best_final_f05:.4f} at Threshold {best_thresh:.2f}")
     print("=" * 75)
 

@@ -9,6 +9,10 @@ env/
 student_resource/
 data/
 output/
+output_*/
+final_sub_*/
+code/
+zip*
 output_final/
 sub3_output/
 sub5_output/
