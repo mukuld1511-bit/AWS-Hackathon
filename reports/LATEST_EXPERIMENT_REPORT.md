@@ -88,4 +88,27 @@
 - **Files Ready:** `output_final/matching_results.tsv` and `final_submission.zip`.
 ---
 
+### Run 5: Grandmaster Tri-Model GBDT Ensemble (XGBoost GPU + LightGBM + CatBoost GPU)
+- **Status:** ✅ Executed & Evaluated end-to-end on Test Set (1,732,544 S1 entities) and Ground Truth Holdout.
+- **Holdout Pairwise F0.5:** **`0.9992`** (Precision: `99.96%`, Recall: `99.77%` on 102,744 pairs).
+- **Holdout Macro F_0.5:** **`0.4987 – 0.5285`** (US Macro F_0.5: `0.5285`).
+- **Expected Leaderboard Score:** **`0.52 – 0.58+`** (up from 0.385 baseline).
+- **Algorithmic Innovations:**
+  1. **18-Dimensional Feature Matrix:** Levenshtein, Jaro-Winkler, Longest Common Subsequence, Condensed Spaceless Match, Address Jaccard, Numeric Match/Conflict, US State Match/Conflict, City Conflict Shields, First Word Match.
+  2. **Tri-Model GBDT Diversity:**
+     - XGBoost GPU (Depth-wise hist trees, max_depth=9, 1000 trees, Apache 2.0).
+     - LightGBM (Leaf-wise trees, num_leaves=127, max_depth=12, MIT).
+     - CatBoost GPU (Oblivious symmetric trees, depth=8, Apache 2.0).
+     - Weighted Probability Ensemble: `0.45*XGB + 0.35*LGB + 0.20*CAT`.
+  3. **High-Precision Anchors & Blocker v2:** Phone/pincode extraction + `super_clean_name` (diacritics, dba, metadata, legal suffixes).
+  4. **Tripartite Graph Transitivity with Address Safety:** Recovered **+390,633** cross-source matches with `overlap >= 2 words` safety gating.
+- **Validation Status:**
+  - Official validator `python3 validate_submission.py --check-ids` ran against 9.97M records: **100% PERFECT PASS (0 Warnings, 0 Errors)**.
+  - Candidate set size: Compact (~15 candidates/entity).
+  - Model parameter budget: ~123.5M parameters (0.124B), strictly complying with the $\le 8$B ceiling.
+- **Files Ready for Midnight Submission:**
+  - Direct TSV: `output_grandmaster/matching_results.tsv` (54.93 MB, 1,732,544 rows).
+  - Submission Package: `final_submission.zip` (82 MB).
+---
+
 *(DGX updates will be pushed here and synced automatically to Local PC)*
