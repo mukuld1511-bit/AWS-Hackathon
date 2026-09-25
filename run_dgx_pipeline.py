@@ -153,7 +153,7 @@ def main():
         w_m = csv.writer(fout_m, delimiter='\t', lineterminator='\n')
         w_c = csv.writer(fout_c, delimiter='\t', lineterminator='\n')
         
-        w_m.writerow(["source1_entity_id", "matched_entity_ids"])
+        fout_m.write("source1_entity_id\tmatched_entity_ids\n")
         w_c.writerow(["source1_entity_id", "candidate_entity_ids"])
         
         next(r_s1)
@@ -217,7 +217,7 @@ def main():
             if not feature_matrix:
                 # Need to write empty matches for the batch
                 for b_idx, row in enumerate(batch):
-                    w_m.writerow([row[0].strip(), ""])
+                    fout_m.write(f"{row[0].strip()}\t\n")
                 return
                 
             # Step 2C: XGBoost Prediction
@@ -245,16 +245,16 @@ def main():
             for b_idx, row in enumerate(batch):
                 s1_id = row[0].strip()
                 final_matches = []
-                if best_s2[b_idx] and best_s2_score[b_idx] >= 0.65:
+                if best_s2[b_idx] and best_s2_score[b_idx] >= 0.85:
                     final_matches.append(best_s2[b_idx])
-                if best_s3[b_idx] and best_s3_score[b_idx] >= 0.65:
+                if best_s3[b_idx] and best_s3_score[b_idx] >= 0.85:
                     final_matches.append(best_s3[b_idx])
                     
                 if final_matches:
                     matched_count += 1
-                    w_m.writerow([s1_id, ",".join(final_matches)])
+                    fout_m.write(f"{s1_id}\t{','.join(final_matches)}\n")
                 else:
-                    w_m.writerow([s1_id, ""])
+                    fout_m.write(f"{s1_id}\t\n")
 
         pbar = tqdm(total=1732544, desc="Processing S1")
         for row in r_s1:
