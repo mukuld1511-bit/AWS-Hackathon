@@ -9,7 +9,7 @@ env/
 .DS_Store
 Thumbs.db
 
-# Large Datasets & Heavy Outputs
+# Large Datasets & Heavy Outputs (Keep Git light and fast)
 student_resource/
 output/
 data/
@@ -17,3 +17,8 @@ data/
 *.tsv
 *.csv
 !submissions/SUBMISSION_TRACKER.csv
+
+# Allow Experiment Reports & Logs from DGX
+!reports/
+!reports/*.md
+!reports/*.json
