@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """
 src/multilingual_matcher.py
-Production Multilingual Indic Transliteration Matcher (Version 2)
-Engineered for Amazon ML Challenge 2026 by Prateek.
+Universal Multilingual & Cross-Country Entity Resolution Engine (Version 3 - Global Production)
+Supports: ALL Countries (US, France, India) across ALL Sources (S1, S2, S3).
+Combines:
+  1. Exact Normalized Multi-Country Matching (Deterministic High-Precision)
+  2. Postal / Zip / PIN Code & Address Inverted Index Blocking
+  3. Deep Multilingual Semantic Embedding Re-Ranking (Indic, French, US Latin)
+  4. Precision Clamping (Strict 1 S2, 1 S3 per S1) & Validation Integrity
 """
 
 import os
@@ -15,7 +20,7 @@ import gc
 import argparse
 from collections import defaultdict, Counter
 
-# Safeguard Hugging Face cache location to prevent root permission errors
+# Ensure Hugging Face cache uses safe local directory
 if "HF_HOME" not in os.environ:
     local_cache = os.path.abspath(".venv/hf_cache")
     if os.path.exists(".venv"):
@@ -28,263 +33,352 @@ from sentence_transformers import SentenceTransformer
 # ---------------------------------------------------------------------------
 # Configuration & Constants
 # ---------------------------------------------------------------------------
-MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+FINE_TUNED_MODEL = "output/fine_tuned_multilingual_entity_model"
+DEFAULT_BASE_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
 TEST_S1 = "student_resource/dataset/test/test_source1.tsv"
 TEST_S2 = "student_resource/dataset/test/test_source2.tsv"
 TEST_S3 = "student_resource/dataset/test/test_source3.tsv"
 
 OUTPUT_DIR = "output"
 OUTPUT_TSV = os.path.join(OUTPUT_DIR, "matching_results_prateek.tsv")
-CANDIDATE_CACHE_FILE = os.path.join(OUTPUT_DIR, "indic_candidates_cache.pt")
+CANDIDATE_CACHE_FILE = os.path.join(OUTPUT_DIR, "global_candidates_cache.pt")
 
-# Calibrated Decision Parameters for Macro F0.5
-TIER1_COSINE_THRESHOLD = 0.92      # High confidence pure name transliteration
-BRIDGE_SIM_THRESHOLD = 0.45        # Name similarity supported by address tokens
-MIN_ADDR_TOKEN_OVERLAP = 6         # Minimum overlapping address tokens
-RELAXED_ADDR_TOKEN_OVERLAP = 4     # If numbers/pincode match
-
+LEGAL_SUFFIXES_PATTERN = re.compile(
+    r'\b(inc|incorporated|llc|llp|ltd|limited|pvt|private|corp|corporation|co|company|enterprises|enterprise|group|services|center|sarl|sas|eurl|sa|gmbh)\b',
+    re.IGNORECASE
+)
+PUNCT_PATTERN = re.compile(r'[^\w\s]', re.UNICODE)
 RE_INDIC = re.compile(r'[\u0900-\u0D7F]')
 RE_WORD = re.compile(r'\w+')
 RE_NUM = re.compile(r'\b\d+\b')
-STOPS = {'india', 'near', 'opp', 'opposite', 'road', 'rd', 'street', 'st', 'floor', 'flr', 'no', 'plot', 'ltd', 'pvt'}
+RE_ZIP = re.compile(r'\b\d{4,6}\b')
+STOPS = {'india', 'usa', 'us', 'france', 'near', 'opp', 'opposite', 'road', 'rd', 'street', 'st', 'floor', 'flr', 'no', 'plot', 'ltd', 'pvt', 'rue', 'av', 'ave', 'boulevard', 'bd', 'blvd', 'cedex'}
 
-def is_india(country_str):
-    return bool(country_str and country_str.strip().lower() == "india")
+def normalize_name(name: str) -> str:
+    if not name:
+        return ""
+    text = PUNCT_PATTERN.sub(' ', name.lower())
+    text = LEGAL_SUFFIXES_PATTERN.sub(' ', text)
+    return " ".join(text.split())
 
-def extract_address_tokens(addr):
-    if not addr: return set()
+def extract_address_tokens(addr: str):
+    if not addr:
+        return set()
     return {w for w in RE_WORD.findall(addr.lower()) if len(w) > 1 and w not in STOPS}
 
-def extract_numbers(addr):
-    if not addr: return set()
+def extract_postal_code(addr: str):
+    if not addr:
+        return None
+    codes = RE_ZIP.findall(addr)
+    return codes[-1] if codes else None
+
+def extract_numbers(addr: str):
+    if not addr:
+        return set()
     return set(RE_NUM.findall(addr.lower()))
 
-def prepare_candidates(model, device, batch_size=512, force_recompute=False):
+# ---------------------------------------------------------------------------
+# Global Candidate Indexing
+# ---------------------------------------------------------------------------
+def build_global_index(model, device, batch_size=512, force_recompute=False):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    inv_index = defaultdict(list)
+    
+    print("\n" + "=" * 70)
+    print("🌍 BUILDING GLOBAL MULTI-COUNTRY CANDIDATE INDEX (US, FRANCE, INDIA)")
+    print("=" * 70)
+    
+    exact_index = defaultdict(list)    # (country, norm_name) -> [cand_idx]
+    postal_index = defaultdict(list)   # (country, postal_code) -> [cand_idx]
+    token_index = defaultdict(list)    # token -> [cand_idx]
+    
+    cand_ids = []
+    cand_names = []
+    cand_addrs = []
+    cand_countries = []
+    cand_tokens_list = []
+    cand_numbers_list = []
 
-    if os.path.exists(CANDIDATE_CACHE_FILE) and not force_recompute:
-        print(f"[*] Loading candidate embeddings from cache: {CANDIDATE_CACHE_FILE}...")
-        t0 = time.time()
-        cache = torch.load(CANDIDATE_CACHE_FILE, map_location=device, weights_only=False)
-        cand_ids = cache["cand_ids"]
-        cand_tokens = cache["cand_tokens"]
-        cand_numbers = cache["cand_numbers"]
-        cand_embeddings = cache["cand_embeddings"].to(device=device, dtype=torch.float16)
-
-        counts = Counter()
-        for toks in cand_tokens: counts.update(toks)
-        for cid, toks in enumerate(cand_tokens):
-            for t in toks:
-                if counts[t] <= 5000:
-                    inv_index[t].append(cid)
-
-        print(f"[+] Loaded {len(cand_ids):,} candidates from cache in {time.time()-t0:.2f}s")
-        return cand_ids, cand_tokens, cand_numbers, inv_index, cand_embeddings
-
-    print("\n[*] Scanning Test S2 and S3 for India records with Indic names...")
     t0 = time.time()
-    cand_ids, cand_names, cand_tokens, cand_numbers = [], [], [], []
+    for src_name, src_path in [("Source2", TEST_S2), ("Source3", TEST_S3)]:
+        print(f"[*] Scanning {src_name} ({src_path})...")
+        with open(src_path, "r", encoding="utf-8") as f:
+            reader = csv.reader(f, delimiter="\t")
+            next(reader, None)
+            for row in reader:
+                if len(row) < 4:
+                    continue
+                eid, b_name, b_addr, country = row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()
+                cid = len(cand_ids)
+                cand_ids.append(eid)
+                cand_names.append(b_name)
+                cand_addrs.append(b_addr)
+                cand_countries.append(country)
 
-    def load_file(filepath):
-        loaded = 0
-        with open(filepath, "r", encoding="utf-8") as f:
-            r = csv.reader(f, delimiter="\t")
-            next(r, None)
-            for row in r:
-                if len(row) < 4: continue
-                if is_india(row[3]) and RE_INDIC.search(row[1]):
-                    cid = len(cand_ids)
-                    cand_ids.append(row[0].strip())
-                    cand_names.append(row[1].strip())
-                    toks = extract_address_tokens(row[2])
-                    nums = extract_numbers(row[2])
-                    cand_tokens.append(toks)
-                    cand_numbers.append(nums)
-                    loaded += 1
-        return loaded
+                norm_n = normalize_name(b_name)
+                if norm_n and country:
+                    exact_index[(country.lower(), norm_n)].append(cid)
 
-    s2_count = load_file(TEST_S2)
-    s3_count = load_file(TEST_S3)
-    total_cands = len(cand_ids)
-    print(f"[+] Loaded {total_cands:,} Indic candidates (S2: {s2_count:,}, S3: {s3_count:,}) in {time.time()-t0:.2f}s")
+                post_code = extract_postal_code(b_addr)
+                if post_code and country:
+                    postal_index[(country.lower(), post_code)].append(cid)
 
+                toks = extract_address_tokens(b_addr)
+                cand_tokens_list.append(toks)
+                cand_numbers_list.append(extract_numbers(b_addr))
+
+    print(f"[+] Total Candidates Indexed across all countries: {len(cand_ids):,} in {time.time()-t0:.2f}s")
+    print(f"[+] Exact Name Buckets: {len(exact_index):,}")
+    print(f"[+] Postal Code Buckets: {len(postal_index):,}")
+
+    # Build filtered token index for rare tokens to assist fuzzy matching
+    print("[*] Building inverted token index...")
     counts = Counter()
-    for toks in cand_tokens: counts.update(toks)
-    for cid, toks in enumerate(cand_tokens):
+    for toks in cand_tokens_list:
+        counts.update(toks)
+    
+    for cid, toks in enumerate(cand_tokens_list):
         for t in toks:
-            if counts[t] <= 5000:
-                inv_index[t].append(cid)
+            if 2 <= counts[t] <= 4000:
+                token_index[t].append(cid)
+    
+    print(f"[+] Active Rare Inverted Tokens: {len(token_index):,}")
 
-    print(f"[*] Encoding {total_cands:,} candidate names into float16 tensor...")
-    t1 = time.time()
-    cand_embeddings = model.encode(
-        cand_names, batch_size=batch_size, show_progress_bar=True,
-        normalize_embeddings=True, convert_to_tensor=True, device=device
-    ).to(dtype=torch.float16)
-    print(f"[+] Candidate names encoded in {time.time()-t1:.2f}s. Shape: {cand_embeddings.shape}")
-
-    del cand_names
-    gc.collect()
-
-    torch.save({
+    return {
         "cand_ids": cand_ids,
-        "cand_tokens": cand_tokens,
-        "cand_numbers": cand_numbers,
-        "cand_embeddings": cand_embeddings.cpu(),
-    }, CANDIDATE_CACHE_FILE)
-    print("[+] Cache saved.")
+        "cand_names": cand_names,
+        "cand_addrs": cand_addrs,
+        "cand_countries": cand_countries,
+        "cand_tokens": cand_tokens_list,
+        "cand_numbers": cand_numbers_list,
+        "exact_index": exact_index,
+        "postal_index": postal_index,
+        "token_index": token_index
+    }
 
-    cand_embeddings = cand_embeddings.to(device=device)
-    return cand_ids, cand_tokens, cand_numbers, inv_index, cand_embeddings
-
-def run_matcher(batch_size=512, chunk_size=2000, force_recompute=False):
-    start_time = time.time()
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+# ---------------------------------------------------------------------------
+# Global Multi-Country Matching Pipeline
+# ---------------------------------------------------------------------------
+def run_global_matching(batch_size=512, chunk_size=5000):
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    # Check if fine-tuned model exists, else fallback to high-quality base multilingual model
+    model_path = FINE_TUNED_MODEL if os.path.exists(FINE_TUNED_MODEL) else DEFAULT_BASE_MODEL
+    print("\n" + "=" * 70)
+    print(f"🚀 RUNNING GLOBAL MULTI-COUNTRY MATCHER ON DEVICE: {device}")
+    print(f"[*] Model: {model_path}")
+    print("=" * 70)
 
-    print("=" * 80)
-    print("🚀 PRATEEK MULTILINGUAL INDIC MATCHER (VERSION 2 - PRODUCTION)")
-    print(f"Device: {device} | Batch Size: {batch_size} | Chunk Size: {chunk_size:,}")
-    print("=" * 80)
+    model = SentenceTransformer(model_path, device=device)
 
-    model = SentenceTransformer(MODEL_NAME, device=device)
-    cand_ids, cand_tokens, cand_numbers, inv_index, cand_embeddings = prepare_candidates(
-        model, device, batch_size=batch_size, force_recompute=force_recompute
-    )
+    # 1. Build Global Candidate Index
+    cand_data = build_global_index(model, device, batch_size=batch_size)
+    cand_ids = cand_data["cand_ids"]
+    cand_names = cand_data["cand_names"]
+    cand_addrs = cand_data["cand_addrs"]
+    cand_countries = cand_data["cand_countries"]
+    cand_tokens = cand_data["cand_tokens"]
+    cand_numbers = cand_data["cand_numbers"]
+    exact_index = cand_data["exact_index"]
+    postal_index = cand_data["postal_index"]
+    token_index = cand_data["token_index"]
 
-    print(f"\n[*] Processing Test S1 records and writing full 1,732,544 row output to {OUTPUT_TSV}...")
+    # 2. Process Test S1 in Memory-Safe Streaming Chunks
+    print(f"\n[*] Processing Test S1 records and writing output to {OUTPUT_TSV}...")
+    t_start = time.time()
+    total_processed = 0
+    total_matched = 0
 
-    total_rows = 0
+    with open(TEST_S1, "r", encoding="utf-8") as in_f, \
+         open(OUTPUT_TSV, "w", encoding="utf-8", newline="") as out_f:
+
+        reader = csv.reader(in_f, delimiter="\t")
+        next(reader, None)  # Skip header
+
+        out_f.write("source1_entity_id\tmatched_entity_ids\n")
+
+        chunk_rows = []
+        for row in reader:
+            chunk_rows.append(row)
+            if len(chunk_rows) >= chunk_size:
+                matched_in_chunk = process_chunk(
+                    chunk_rows, out_f, model, device,
+                    cand_ids, cand_names, cand_addrs, cand_countries,
+                    cand_tokens, cand_numbers, exact_index, postal_index, token_index
+                )
+                total_processed += len(chunk_rows)
+                total_matched += matched_in_chunk
+                chunk_rows = []
+
+                speed = total_processed / (time.time() - t_start)
+                print(f"    Processed {total_processed:>9,} / 1,732,544 rows... ({speed:>5.0f} rows/s, Total Matched: {total_matched:>9,})")
+
+        if chunk_rows:
+            matched_in_chunk = process_chunk(
+                chunk_rows, out_f, model, device,
+                cand_ids, cand_names, cand_addrs, cand_countries,
+                cand_tokens, cand_numbers, exact_index, postal_index, token_index
+            )
+            total_processed += len(chunk_rows)
+            total_matched += matched_in_chunk
+
+    elapsed = time.time() - t_start
+    print("\n" + "=" * 70)
+    print(f"🎉 GLOBAL MULTI-COUNTRY MATCHING COMPLETE IN {elapsed/60:.2f} MINUTES!")
+    print(f"[+] Total S1 Rows Processed: {total_processed:,}")
+    print(f"[+] Total Matches Produced:  {total_matched:,} ({total_matched/total_processed*100:.2f}%)")
+    print(f"[+] Output File:             {OUTPUT_TSV} ({os.path.getsize(OUTPUT_TSV)/(1024*1024):.2f} MB)")
+    print("=" * 70)
+
+def process_chunk(
+    chunk_rows, out_f, model, device,
+    cand_ids, cand_names, cand_addrs, cand_countries,
+    cand_tokens, cand_numbers, exact_index, postal_index, token_index
+):
     matched_count = 0
 
-    with open(TEST_S1, "r", encoding="utf-8") as fin, \
-         open(OUTPUT_TSV, "w", encoding="utf-8", newline="") as fout:
+    # Step 1: High-Speed Exact & Postal Matching
+    unresolved_queries = []  # (row_index, s1_id, name, addr, country, candidate_cids)
+    results = [None] * len(chunk_rows)
 
-        reader = csv.reader(fin, delimiter="\t")
-        writer = csv.writer(fout, delimiter="\t", lineterminator="\n")
+    for i, row in enumerate(chunk_rows):
+        if len(row) < 4:
+            s1_id = row[0].strip() if row else ""
+            results[i] = (s1_id, "")
+            continue
+
+        s1_id, name, addr, country = row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()
+        c_lower = country.lower()
+        norm_n = normalize_name(name)
+        post_code = extract_postal_code(addr)
+        s1_toks = extract_address_tokens(addr)
+        s1_nums = extract_numbers(addr)
+
+        # Tier 1: Exact Name + Country Match
+        exact_cids = exact_index.get((c_lower, norm_n), [])
+        if exact_cids:
+            # Group by S2 / S3
+            best_s2, best_s3 = None, None
+            for cid in exact_cids:
+                cid_target = cand_ids[cid]
+                is_s2 = cid_target.startswith(("S2-", "S2_"))
+                is_s3 = cid_target.startswith(("S3-", "S3_"))
+
+                # Disambiguate using address token and number overlap
+                t_overlap = len(s1_toks.intersection(cand_tokens[cid]))
+                num_overlap = len(s1_nums.intersection(cand_numbers[cid]))
+                score = t_overlap * 2 + num_overlap * 3
+
+                if is_s2 and (best_s2 is None or score > best_s2[1]):
+                    best_s2 = (cid_target, score)
+                elif is_s3 and (best_s3 is None or score > best_s3[1]):
+                    best_s3 = (cid_target, score)
+
+            matched_list = []
+            if best_s2: matched_list.append(best_s2[0])
+            if best_s3: matched_list.append(best_s3[0])
+
+            if matched_list:
+                results[i] = (s1_id, ",".join(matched_list))
+                matched_count += 1
+                continue
+
+        # Collect candidate pool for semantic / fuzzy matching
+        cand_pool = set()
         
-        # Write exact required header
-        writer.writerow(["source1_entity_id", "matched_entity_ids"])
-        next(reader, None)
+        # Postal code candidates
+        if post_code:
+            for cid in postal_index.get((c_lower, post_code), [])[:15]:
+                cand_pool.add(cid)
 
-        s1_batch = []
+        # Rare address/name token candidates
+        for tok in list(s1_toks)[:3]:
+            for cid in token_index.get(tok, [])[:10]:
+                if cand_countries[cid].lower() == c_lower:
+                    cand_pool.add(cid)
 
-        def process_batch(batch):
-            nonlocal matched_count
-            b_ids = [r[0].strip() for r in batch]
-            b_names = [r[1].strip() if len(r)>1 else "" for r in batch]
-            b_addrs = [r[2].strip() if len(r)>2 else "" for r in batch]
-            b_countries = [r[3].strip() if len(r)>3 else "" for r in batch]
+        # Cap cand_pool to top 20 candidates
+        if cand_pool and len(cand_pool) <= 20:
+            unresolved_queries.append((i, s1_id, name, addr, country, list(cand_pool)))
+        else:
+            results[i] = (s1_id, "")
 
-            # Only encode India entities with Indic characters or non-empty names
-            india_indices = [i for i, c in enumerate(b_countries) if is_india(c) and b_names[i]]
-            
-            # Map of local_idx -> best matches
-            best_s2 = [None] * len(batch)
-            best_s2_score = [0.0] * len(batch)
-            best_s3 = [None] * len(batch)
-            best_s3_score = [0.0] * len(batch)
+    # Step 2: Batch Multilingual Semantic Re-ranking on Unresolved Queries
+    if unresolved_queries:
+        # 1. Batch encode all queries in chunk
+        query_texts = [f"{q[2]} | {q[3]}" if q[3] else q[2] for q in unresolved_queries]
+        q_embeddings = model.encode(
+            query_texts,
+            batch_size=256,
+            show_progress_bar=False,
+            convert_to_tensor=True,
+            device=device,
+            normalize_embeddings=True
+        )
 
-            if india_indices:
-                sub_names = [b_names[i] for i in india_indices]
-                embs = model.encode(
-                    sub_names, batch_size=len(sub_names), show_progress_bar=False,
-                    normalize_embeddings=True, convert_to_tensor=True, device=device
-                ).to(dtype=torch.float16)
+        # 2. Gather all unique candidate CIDs and encode in ONE batch pass
+        unique_cids = list({cid for q in unresolved_queries for cid in q[5]})
+        cid_to_pos = {cid: idx for idx, cid in enumerate(unique_cids)}
+        cand_texts = [f"{cand_names[c]} | {cand_addrs[c]}" if cand_addrs[c] else cand_names[c] for c in unique_cids]
+        
+        c_embeddings_all = model.encode(
+            cand_texts,
+            batch_size=512,
+            show_progress_bar=False,
+            convert_to_tensor=True,
+            device=device,
+            normalize_embeddings=True
+        )
 
-                sims = torch.matmul(embs, cand_embeddings.T)
+        # 3. Fast Vectorized Similarity Scoring
+        for q_idx, (orig_i, s1_id, name, addr, country, cand_list) in enumerate(unresolved_queries):
+            c_lower = country.lower()
+            s1_toks = extract_address_tokens(addr)
+            s1_nums = extract_numbers(addr)
 
-                for local_pos, orig_idx in enumerate(india_indices):
-                    s_sims = sims[local_pos]
-                    
-                    # 1. High-Confidence Tier 1 (Transliteration >= 0.92)
-                    top_scores, top_indices = torch.topk(s_sims, k=min(20, len(cand_ids)))
-                    top_scores_np = top_scores.cpu().numpy()
-                    top_indices_np = top_indices.cpu().numpy()
+            pos_indices = [cid_to_pos[c] for c in cand_list]
+            sub_c_embs = c_embeddings_all[pos_indices]
+            q_emb = q_embeddings[q_idx]
+            sims = torch.mv(sub_c_embs, q_emb).cpu().numpy()
 
-                    for score, c_idx in zip(top_scores_np, top_indices_np):
-                        cid = cand_ids[c_idx]
-                        if score >= TIER1_COSINE_THRESHOLD:
-                            if cid.startswith("S2-") and score > best_s2_score[orig_idx]:
-                                best_s2_score[orig_idx] = score
-                                best_s2[orig_idx] = cid
-                            elif cid.startswith("S3-") and score > best_s3_score[orig_idx]:
-                                best_s3_score[orig_idx] = score
-                                best_s3[orig_idx] = cid
+            best_s2, best_s3 = None, None
+            for c_pos, cid in enumerate(cand_list):
+                sim = float(sims[c_pos])
+                cid_target = cand_ids[cid]
+                is_s2 = cid_target.startswith(("S2-", "S2_"))
+                is_s3 = cid_target.startswith(("S3-", "S3_"))
 
-                    # 2. Tier 2: Address Bridging (Address Overlap >= 6 and Sim >= 0.45)
-                    s_toks = extract_address_tokens(b_addrs[orig_idx])
-                    if s_toks:
-                        s_nums = extract_numbers(b_addrs[orig_idx])
-                        cand_hits = Counter()
-                        for t in s_toks:
-                            if t in inv_index:
-                                for cid in inv_index[t]: cand_hits[cid] += 1
-                        
-                        for cid, hits in cand_hits.items():
-                            has_num = bool(s_nums & cand_numbers[cid]) if (s_nums and cand_numbers[cid]) else False
-                            if hits >= MIN_ADDR_TOKEN_OVERLAP or (hits >= RELAXED_ADDR_TOKEN_OVERLAP and has_num):
-                                score = s_sims[cid].item()
-                                if score >= BRIDGE_SIM_THRESHOLD:
-                                    target_id = cand_ids[cid]
-                                    if target_id.startswith("S2-") and score > best_s2_score[orig_idx]:
-                                        best_s2_score[orig_idx] = score
-                                        best_s2[orig_idx] = target_id
-                                    elif target_id.startswith("S3-") and score > best_s3_score[orig_idx]:
-                                        best_s3_score[orig_idx] = score
-                                        best_s3[orig_idx] = target_id
+                t_overlap = len(s1_toks.intersection(cand_tokens[cid]))
+                num_overlap = len(s1_nums.intersection(cand_numbers[cid]))
 
-                del embs
-                del sims
-                if device == "cuda": torch.cuda.empty_cache()
+                # High confidence semantic match with minimum geographic / token overlap
+                if (sim >= 0.84 and (t_overlap >= 1 or num_overlap >= 1)) or (sim >= 0.70 and t_overlap >= 3):
+                    combined_score = sim + (0.05 * t_overlap) + (0.1 * num_overlap)
+                    if is_s2 and (best_s2 is None or combined_score > best_s2[1]):
+                        best_s2 = (cid_target, combined_score)
+                    elif is_s3 and (best_s3 is None or combined_score > best_s3[1]):
+                        best_s3 = (cid_target, combined_score)
 
-            # Write EXACT matches (Clamped strictly to at most 1 S2 and 1 S3)
-            for idx in range(len(batch)):
-                s1_id = b_ids[idx]
-                matches = []
-                if best_s2[idx]: matches.append(best_s2[idx])
-                if best_s3[idx]: matches.append(best_s3[idx])
+            matched_list = []
+            if best_s2: matched_list.append(best_s2[0])
+            if best_s3: matched_list.append(best_s3[0])
 
-                if matches:
-                    matched_count += 1
-                    writer.writerow([s1_id, ",".join(matches)])
-                else:
-                    # Clean singleton row for non-India or unmatched
-                    writer.writerow([s1_id, ""])
+            if matched_list:
+                results[orig_i] = (s1_id, ",".join(matched_list))
+                matched_count += 1
+            else:
+                results[orig_i] = (s1_id, "")
 
-        t_loop = time.time()
-        for row in reader:
-            total_rows += 1
-            s1_batch.append(row)
-            if len(s1_batch) >= chunk_size:
-                process_batch(s1_batch)
-                s1_batch = []
-                if total_rows % 100000 == 0:
-                    speed = total_rows / (time.time() - t_loop)
-                    print(f"    Processed {total_rows:>9,} / 1,732,544 rows... ({speed:>5.0f} rows/s, Matched: {matched_count:>7,})")
+    # Step 3: Write Chunk Output
+    for s1_id, match_str in results:
+        out_f.write(f"{s1_id}\t{match_str}\n")
 
-        if s1_batch:
-            process_batch(s1_batch)
-
-    print("\n" + "=" * 80)
-    print("✅ EXECUTION COMPLETE!")
-    print(f"Total Rows Written: {total_rows:,} (Expected: 1,732,544)")
-    print(f"Total Matched:      {matched_count:,}")
-    print(f"Output File:        {OUTPUT_TSV}")
-    print(f"Execution Time:     {time.time()-start_time:.1f}s ({(time.time()-start_time)/60:.2f} mins)")
-    print("=" * 80)
-
-    # Automatically validate output using Python validator
-    val_cmd = f'"{sys.executable}" validate_dgx_tsv.py "{OUTPUT_TSV}"'
-    print(f"\n[*] Running validator: {val_cmd}")
-    os.system(val_cmd)
+    return matched_count
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--batch-size", type=int, default=512)
-    parser.add_argument("--chunk-size", type=int, default=2000)
-    parser.add_argument("--force-recompute", action="store_true")
+    parser = argparse.ArgumentParser(description="Universal Multi-Country Multilingual Matcher")
+    parser.add_argument("--batch_size", type=int, default=512, help="Embedding batch size")
+    parser.add_argument("--chunk_size", type=int, default=5000, help="Chunk size for streaming processing")
     args = parser.parse_args()
 
-    run_matcher(batch_size=args.batch_size, chunk_size=args.chunk_size, force_recompute=args.force_recompute)
+    run_global_matching(batch_size=args.batch_size, chunk_size=args.chunk_size)
