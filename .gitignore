@@ -7,7 +7,7 @@ env/
 
 # System
 .DS_Store
-Thumbs.db
+Thumbs.db``
 
 # Large Datasets & Heavy Outputs (Keep Git light and fast)
 student_resource/

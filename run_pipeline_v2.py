@@ -106,33 +106,16 @@ def extract_geo_token(addr: str, geo_set: set) -> str:
 
 def extract_features(s1_name, s1_addr, s2_name, s2_addr, s1_state="", s2_state=""):
     features = []
-    # String similarity features
+    # 6 features (exact match for trained xgb_reranker.json)
     features.append(fuzz.ratio(s1_name, s2_name))
     features.append(fuzz.token_set_ratio(s1_name, s2_name))
     features.append(fuzz.token_sort_ratio(s1_name, s2_name))
-    features.append(fuzz.partial_ratio(s1_name, s2_name))
     features.append(distance.JaroWinkler.normalized_similarity(s1_name, s2_name) * 100)
-
-    # Address features
     s1_addr_tokens = set(s1_addr.lower().split()) if s1_addr else set()
     s2_addr_tokens = set(s2_addr.lower().split()) if s2_addr else set()
     overlap = len(s1_addr_tokens & s2_addr_tokens)
     features.append(overlap)
     features.append(abs(len(s1_name) - len(s2_name)))
-
-    # NEW Phase 1 Features
-    # US State exact match (1=same state, 0=different/unknown)
-    state_match = 1 if (s1_state and s2_state and s1_state == s2_state) else 0
-    features.append(state_match)
-
-    # State mismatch penalty (1=known conflict)
-    state_conflict = 1 if (s1_state and s2_state and s1_state != s2_state) else 0
-    features.append(state_conflict)
-
-    # Address token overlap ratio (normalized)
-    addr_jaccard = overlap / max(len(s1_addr_tokens | s2_addr_tokens), 1)
-    features.append(addr_jaccard * 100)
-
     return features
 
 def main():
