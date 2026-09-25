@@ -5,24 +5,28 @@ __pycache__/
 venv/
 env/
 
-# System
-.DS_Store
-Thumbs.db``
-
-# Large Datasets & Heavy Outputs (Keep Git light and fast)
+# Data and large output files (Keep Git light and fast)
 student_resource/
-output/
 data/
-*.zip
+output/
+output_final/
+sub3_output/
+sub5_output/
+6ab10eb3b23ba_student_resource/
 *.tsv
 *.csv
-!submissions/SUBMISSION_TRACKER.csv
+*.tar.gz
+*.zip
+*.pt
+*.pkl
+catboost_info/
 
-# Allow Experiment Reports & Logs from DGX
+# Exceptions: Allow essential reports & trackers
+!submissions/SUBMISSION_TRACKER.csv
 !reports/
 !reports/*.md
 !reports/*.json
 
-# Large model binaries and caches
-*.pkl
-catboost_info/
+# System
+.DS_Store
+Thumbs.db
