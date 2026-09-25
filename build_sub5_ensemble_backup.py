@@ -80,8 +80,13 @@ def build_ensemble():
             
             final_matches = []
             
-            # Primary: High-confidence Multilingual Indic matches (Overrides XGBoost)
-            if s1_id in multi_matches:
+            # Primary: Sub 4 GBDT matches
+            if s1_id in sub4_matches and sub4_matches[s1_id]:
+                final_matches = list(sub4_matches[s1_id])
+                sub4_used += 1
+            
+            # Secondary: Fill gaps with high-confidence Multilingual Indic matches
+            if not final_matches and s1_id in multi_matches:
                 m_cands = multi_matches[s1_id]
                 s2_cand = [x for x in m_cands if x.startswith("S2-")]
                 s3_cand = [x for x in m_cands if x.startswith("S3-")]
@@ -89,11 +94,6 @@ def build_ensemble():
                 if s3_cand: final_matches.append(s3_cand[0])
                 if final_matches:
                     multi_added += 1
-            
-            # Secondary: Fill gaps with Sub 4 GBDT matches if Multilingual didn't find anything
-            if not final_matches and s1_id in sub4_matches and sub4_matches[s1_id]:
-                final_matches = list(sub4_matches[s1_id])
-                sub4_used += 1
             
             if final_matches:
                 fout.write(f"{s1_id}\t{','.join(final_matches)}\n")

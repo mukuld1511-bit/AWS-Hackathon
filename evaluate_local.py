@@ -106,7 +106,7 @@ def main():
 
     # 3. Process S1 and evaluate
     s1_path = os.path.join(DATA_DIR, "train_source1.tsv")
-    scores = []
+    scores = [[], [], [], [], [], []]
     
     print("[*] Running Pipeline & Evaluating...")
     with open(s1_path, encoding='utf-8') as fin:
@@ -180,15 +180,15 @@ def main():
                 s1_id = row[0].strip()
                 if s1_id not in ground_truth: continue
                 
-                final_matches = []
-                if best_s2[b_idx] and best_s2_score[b_idx] >= 0.65:
-                    final_matches.append(best_s2[b_idx])
-                if best_s3[b_idx] and best_s3_score[b_idx] >= 0.65:
-                    final_matches.append(best_s3[b_idx])
-                    
-                f05 = calculate_f05(ground_truth[s1_id], final_matches)
-                scores.append(f05)
-
+                for t_idx, thresh in enumerate([0.65, 0.85, 0.90, 0.95, 0.98, 0.99]):
+                    final_matches = []
+                    if best_s2[b_idx] and best_s2_score[b_idx] >= thresh:
+                        final_matches.append(best_s2[b_idx])
+                    if best_s3[b_idx] and best_s3_score[b_idx] >= thresh:
+                        final_matches.append(best_s3[b_idx])
+                        
+                    f05 = calculate_f05(ground_truth[s1_id], final_matches)
+                    scores[t_idx].append(f05)
         pbar = tqdm(total=100000)
         for row in r_s1:
             if len(scores) >= 100000: break
@@ -198,13 +198,16 @@ def main():
                 pbar.update(len(batch_s1))
                 batch_s1 = []
                 
-        if batch_s1 and len(scores) < 100000:
+        if batch_s1 and len(scores[0]) < 100000:
             process_batch(batch_s1)
             pbar.update(len(batch_s1))
         pbar.close()
 
-    macro_f05 = sum(scores) / len(scores) if scores else 0.0
-    print(f"\n[+] ESTIMATED MACRO F0.5 SCORE (XGBoost): {macro_f05:.4f}")
+    thresholds = [0.65, 0.85, 0.90, 0.95, 0.98, 0.99]
+    print("\n[+] ESTIMATED MACRO F0.5 SCORES (XGBoost):")
+    for t_idx, thresh in enumerate(thresholds):
+        macro_f05 = sum(scores[t_idx]) / len(scores[t_idx]) if scores[t_idx] else 0.0
+        print(f"    Threshold {thresh:.2f} -> {macro_f05:.4f}")
 
 if __name__ == "__main__":
     main()

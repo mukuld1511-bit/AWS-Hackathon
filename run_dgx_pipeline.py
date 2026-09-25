@@ -245,9 +245,9 @@ def main():
             for b_idx, row in enumerate(batch):
                 s1_id = row[0].strip()
                 final_matches = []
-                if best_s2[b_idx] and best_s2_score[b_idx] >= 0.85:
+                if best_s2[b_idx] and best_s2_score[b_idx] >= 0.99:
                     final_matches.append(best_s2[b_idx])
-                if best_s3[b_idx] and best_s3_score[b_idx] >= 0.85:
+                if best_s3[b_idx] and best_s3_score[b_idx] >= 0.99:
                     final_matches.append(best_s3[b_idx])
                     
                 if final_matches:

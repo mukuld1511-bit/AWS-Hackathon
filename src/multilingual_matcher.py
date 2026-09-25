@@ -56,10 +56,11 @@ CHECKPOINT_FILE = os.path.join(OUTPUT_DIR, "matcher_checkpoint.json")
 CANDIDATE_CACHE_FILE = os.path.join(OUTPUT_DIR, "indic_candidates_cache.pt")
 
 # Calibrated Decision Rule Parameters (from Phase 2 empirical validation)
-HIGH_CONF_SIM_THRESHOLD = 0.95
-BRIDGE_SIM_THRESHOLD = 0.45
+# Tier 1 (Pure Cosine) is disabled as it produces 76% false positives.
+HIGH_CONF_SIM_THRESHOLD = 1.01 # Disabled
+BRIDGE_SIM_THRESHOLD = 0.50
 MIN_ADDR_TOKEN_OVERLAP = 7
-RELAXED_ADDR_TOKEN_OVERLAP = 5
+RELAXED_ADDR_TOKEN_OVERLAP = 999 # Disabled
 MAX_MATCHES_PER_ENTITY = 15
 
 # Indic script Unicode block: U+0900 (Devanagari) to U+0D7F (Malayalam)
