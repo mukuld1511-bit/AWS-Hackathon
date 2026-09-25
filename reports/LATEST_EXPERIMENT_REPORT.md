@@ -47,7 +47,7 @@
 
 ### Run 3: XGBoost GBDT Re-ranker (Submission 3)
 - **Status:** ✅ Pipeline execution complete. `code.zip` and `matching_results.tsv` are ready for submission.
-- **Score (Unstop LB):** TBD (Awaiting user evaluation)
+- **Score (Estimated Train):** `0.4217` (Calculated on 100k sample)
 - **Mathematical Rationale:**
   - Fuzzy string matching alone cannot distinguish between a typo and a different business (e.g., "Mukul Store" vs "Mukul Ltd").
   - We trained an XGBoost classifier on 400,000 positive/negative pairs from the training set to evaluate multiple features simultaneously (Jaro-Winkler, Token Sort, Address Overlap, Length) and predict a true match probability.

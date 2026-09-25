@@ -1,14 +1,21 @@
+"""
+DGX Fast High-Precision Entity Resolution Pipeline (SUBMISSION 3)
+Stage 2: XGBoost Re-ranker (No Dense Embeddings)
+"""
 import os
 import re
 import csv
 import time
+import zipfile
 import numpy as np
 from collections import defaultdict
 from rapidfuzz import fuzz, distance
 from tqdm import tqdm
 import xgboost as xgb
 
-DATA_DIR = "student_resource/dataset/train"
+DATA_DIR = "student_resource/dataset"
+OUTPUT_DIR = "sub3_output"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 LEGAL_SUFFIXES = re.compile(
     r'\b(inc|incorporated|llc|llp|ltd|limited|pvt|private|corp|corporation|co|company|enterprises|enterprise|group|services|center|sa|sarl|gmbh)\b',
@@ -41,38 +48,28 @@ def extract_features(s1_name, s1_addr, s2_name, s2_addr):
     features.append(abs(len(s1_name) - len(s2_name)))
     return features
 
-def calculate_f05(y_true, y_pred):
-    true_set = set(y_true)
-    pred_set = set(y_pred)
-    if not true_set and not pred_set:
-        return 1.0
-    if not true_set or not pred_set:
-        return 0.0
-    tp = len(true_set & pred_set)
-    if tp == 0:
-        return 0.0
-    precision = tp / len(pred_set)
-    recall = tp / len(true_set)
-    return (1.25 * precision * recall) / (0.25 * precision + recall)
-
 def main():
     print("="*70)
-    print("🚀 LOCAL TRAIN ESTIMATION (N=100,000 entities)")
+    print("🚀 STARTING SUBMISSION 3 PIPELINE (XGBoost Re-ranker)")
     print("="*70)
-    
+
     print("[*] Loading XGBoost Re-ranker Model...")
     xgb_model = xgb.Booster()
-    xgb_model.load_model("xgb_reranker.json")
+    if os.path.exists("xgb_reranker.json"):
+        xgb_model.load_model("xgb_reranker.json")
+    else:
+        print("[!] Warning: xgb_reranker.json not found! XGBoost stage will fail.")
 
-    # 1. Load S2 and S3 for indexing
+    # STEP 1: INDEX S2 AND S3 BY COUNTRY + NAME PREFIX + PINCODE
     print("[*] Indexing Target Records (S2 & S3)...")
     idx_exact = defaultdict(list)
     idx_first3 = defaultdict(list)
     idx_pin = defaultdict(list)
     records = {}
 
-    for fname in ["train_source2.tsv", "train_source3.tsv"]:
-        path = os.path.join(DATA_DIR, fname)
+    for fname in ["test_source2.tsv", "test_source3.tsv"]:
+        path = os.path.join(DATA_DIR, "test", fname)
+        if not os.path.exists(path): continue
         print(f"    Reading {fname}...")
         with open(path, encoding='utf-8') as f:
             reader = csv.reader(f, delimiter='\t')
@@ -92,38 +89,44 @@ def main():
                 if pin:
                     idx_pin[(country, pin)].append(eid)
 
-    # 2. Load Ground Truth
-    gt_path = os.path.join(DATA_DIR, "train_ground_truth.tsv")
-    ground_truth = {}
-    with open(gt_path, encoding='utf-8') as f:
-        reader = csv.reader(f, delimiter='\t')
-        next(reader)
-        for i, row in enumerate(reader):
-            if i >= 100000: break
-            if len(row) < 2: continue
-            matches = [x.strip() for x in row[1].split(',')] if row[1].strip() else []
-            ground_truth[row[0].strip()] = matches
+    print(f"[+] Loaded {len(records):,} target records.")
 
-    # 3. Process S1 and evaluate
-    s1_path = os.path.join(DATA_DIR, "train_source1.tsv")
-    scores = []
-    
-    print("[*] Running Pipeline & Evaluating...")
-    with open(s1_path, encoding='utf-8') as fin:
+    # STEP 2: PROCESS S1 ENTITIES & GBDT RE-RANK
+    s1_path = os.path.join(DATA_DIR, "test", "test_source1.tsv")
+    matching_file = os.path.join(OUTPUT_DIR, "matching_results.tsv")
+    candidate_file = os.path.join(OUTPUT_DIR, "candidate_pairs.tsv")
+
+    print("[*] Matching S1 Entities with XGBoost scoring...")
+    matched_count = 0
+    total_s1 = 0
+
+    with open(s1_path, encoding='utf-8') as fin, \
+         open(matching_file, 'w', encoding='utf-8', newline='') as fout_m, \
+         open(candidate_file, 'w', encoding='utf-8', newline='') as fout_c:
+        
         r_s1 = csv.reader(fin, delimiter='\t')
+        w_m = csv.writer(fout_m, delimiter='\t', lineterminator='\n')
+        w_c = csv.writer(fout_c, delimiter='\t', lineterminator='\n')
+        
+        w_m.writerow(["source1_entity_id", "matched_entity_ids"])
+        w_c.writerow(["source1_entity_id", "candidate_entity_ids"])
+        
         next(r_s1)
         
+        # Batching logic for XGBoost speed
         BATCH_SIZE = 5000
         batch_s1 = []
         
         def process_batch(batch):
+            nonlocal matched_count, total_s1
+            
+            # Extract features for all candidates in batch
             feature_matrix = []
-            cand_refs = [] # (b_idx, cid)
+            cand_refs = [] # List of (batch_idx, cid)
             
             for b_idx, row in enumerate(batch):
+                total_s1 += 1
                 s1_id = row[0].strip()
-                if s1_id not in ground_truth: continue
-                
                 b_name = row[1].strip() if len(row) > 1 else ""
                 b_addr = row[2].strip() if len(row) > 2 else ""
                 country = row[3].strip() if len(row) > 3 else ""
@@ -140,26 +143,32 @@ def main():
                     first_3 = cn[:3]
                     if (country, first_3) in idx_first3:
                         candidates.update(idx_first3[(country, first_3)][:10])
-                
+                        
                 cand_list = list(candidates)
                 if not cand_list:
-                    f05 = calculate_f05(ground_truth[s1_id], [])
-                    scores.append(f05)
+                    w_c.writerow([s1_id, ""])
                     continue
                     
+                w_c.writerow([s1_id, ",".join(cand_list)])
+                
                 for cid in cand_list:
                     t_cn, t_addr, _ = records[cid]
                     feats = extract_features(cn, b_addr, t_cn, t_addr)
                     feature_matrix.append(feats)
                     cand_refs.append((b_idx, cid))
-                    
+            
             if not feature_matrix:
+                # Need to write empty matches for the batch
+                for b_idx, row in enumerate(batch):
+                    w_m.writerow([row[0].strip(), ""])
                 return
                 
+            # Predict batch
             X = np.array(feature_matrix)
             dmatrix = xgb.DMatrix(X)
             probs = xgb_model.predict(dmatrix)
             
+            # Map predictions back to S1 entities
             best_s2 = [None] * len(batch)
             best_s2_score = [0.0] * len(batch)
             best_s3 = [None] * len(batch)
@@ -176,35 +185,62 @@ def main():
                         best_s3_score[b_idx] = prob
                         best_s3[b_idx] = cid
                         
+            # Write matches (Threshold 0.65 as per DGX Prompt)
             for b_idx, row in enumerate(batch):
                 s1_id = row[0].strip()
-                if s1_id not in ground_truth: continue
-                
                 final_matches = []
                 if best_s2[b_idx] and best_s2_score[b_idx] >= 0.65:
                     final_matches.append(best_s2[b_idx])
                 if best_s3[b_idx] and best_s3_score[b_idx] >= 0.65:
                     final_matches.append(best_s3[b_idx])
                     
-                f05 = calculate_f05(ground_truth[s1_id], final_matches)
-                scores.append(f05)
+                if final_matches:
+                    matched_count += 1
+                    w_m.writerow([s1_id, ",".join(final_matches)])
+                else:
+                    # If candidates existed but none passed 0.65 threshold
+                    w_m.writerow([s1_id, ""])
 
-        pbar = tqdm(total=100000)
+        pbar = tqdm(total=1732544, desc="Processing S1")
         for row in r_s1:
-            if len(scores) >= 100000: break
             batch_s1.append(row)
             if len(batch_s1) >= BATCH_SIZE:
                 process_batch(batch_s1)
                 pbar.update(len(batch_s1))
                 batch_s1 = []
                 
-        if batch_s1 and len(scores) < 100000:
+        if batch_s1:
             process_batch(batch_s1)
             pbar.update(len(batch_s1))
         pbar.close()
 
-    macro_f05 = sum(scores) / len(scores) if scores else 0.0
-    print(f"\n[+] ESTIMATED MACRO F0.5 SCORE (XGBoost): {macro_f05:.4f}")
+    print(f"\n[+] Processing Completed!")
+    print(f"[+] Total S1: {total_s1:,} | Matched: {matched_count:,} ({matched_count/total_s1*100:.2f}%)")
+
+    # STEP 3: CREATE SUBMISSION CODE ZIP
+    code_zip = "sub3_code.zip"
+    with zipfile.ZipFile(code_zip, 'w', zipfile.ZIP_DEFLATED) as z:
+        for root, dirs, files in os.walk('src'):
+            for file in files:
+                full = os.path.join(root, file)
+                z.write(full, arcname=os.path.join('code/business_entity_resolution', full))
+        if os.path.exists('requirements.txt'):
+            z.write('requirements.txt', arcname='code/business_entity_resolution/requirements.txt')
+        if os.path.exists('TEAM_INSTRUCTIONS.md'):
+            z.write('TEAM_INSTRUCTIONS.md', arcname='code/business_entity_resolution/README.md')
+        # Also include the model
+        if os.path.exists('xgb_reranker.json'):
+            z.write('xgb_reranker.json', arcname='code/business_entity_resolution/xgb_reranker.json')
+
+    print(f"[+] Created {code_zip} ({os.path.getsize(code_zip)} bytes)")
+
+    # STEP 4: RUN OFFICIAL VALIDATION SCRIPT
+    print("\n[*] Running Official Submission Validator...")
+    os.system(f"python3 student_resource/utils/validate_submission.py --matching {OUTPUT_DIR}/matching_results.tsv --candidate {OUTPUT_DIR}/candidate_pairs.tsv --test-dir student_resource/dataset/test")
+    
+    print("\n[+] To submit to Unstop:")
+    print(f"    Code file: {code_zip}")
+    print(f"    Results file: {OUTPUT_DIR}/matching_results.tsv")
 
 if __name__ == "__main__":
     main()
