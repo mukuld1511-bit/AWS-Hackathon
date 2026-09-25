@@ -349,4 +349,4 @@ git push origin prateek
 2. Mukul will merge it into `main` and execute the Sub 5 fusion pipeline on DGX.
 3. Your multilingual predictions will be fused with the GBDT model, and the team will submit to Unstop.
 4. Once evaluated, Mukul will share the updated leaderboard score with you!
-cd ~/AWS-Hackathon && git checkout main && git pull origin main && chmod +x run_dgx_grandmaster.sh && ./run_dgx_grandmaster.sh
+c

@@ -217,6 +217,9 @@ def main():
 
     # Replace with transitive results
     os.replace(OUT_FINAL_TSV, OUT_MATCHING)
+    final_cand = os.path.join(OUTPUT_DIR, "candidate_pairs_final.tsv")
+    if os.path.exists(final_cand):
+        os.replace(final_cand, OUT_CANDIDATE)
 
     # 5. Strict Official Validation
     print("\n[5/5] Running Strict Competition Validation...")
