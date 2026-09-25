@@ -1,4 +1,4 @@
-﻿"""
+"""
 run_grandmaster_v2_98.py
 ========================
 Phase B + Phase C + Phase D Integrated Engine
@@ -70,6 +70,7 @@ def main():
     idx_postal = defaultdict(list)
     idx_exact_name = defaultdict(list)
     records = {}
+    weighted_edges = [] # List of (u, v, score)
 
     for fname in ["test_source2.tsv", "test_source3.tsv"]:
         path = os.path.join(DATA_DIR, fname)
@@ -79,7 +80,7 @@ def main():
             next(reader, None)
             for row in reader:
                 if len(row) < 4: continue
-                eid, name, addr, country = row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()
+                eid, name, addr, country = row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip().lower()
                 cn = clean_name(name)
                 records[eid] = (cn, addr, country, name)
                 
@@ -97,13 +98,29 @@ def main():
                 if cn and len(cn) > 3:
                     idx_exact_name[(country, cn)].append(eid)
 
+                if fname == "test_source3.tsv":
+                    # Cross-source bridging between S2 and S3 for DSU Transitivity
+                    if cn and len(cn) > 3:
+                        for s2_cand in idx_exact_name.get((country, cn), []):
+                            if s2_cand.startswith("S2-"):
+                                weighted_edges.append((s2_cand, eid, 0.95))
+                    for t_key in ['GSTIN', 'PAN', 'CIN', 'SIREN', 'EIN']:
+                        if t_key in anchors:
+                            for s2_cand in idx_tax.get((country, t_key, anchors[t_key]), []):
+                                if s2_cand.startswith("S2-"):
+                                    weighted_edges.append((s2_cand, eid, 0.999))
+                    if 'PHONE' in anchors:
+                        for s2_cand in idx_phone.get((country, anchors['PHONE']), []):
+                            if s2_cand.startswith("S2-"):
+                                weighted_edges.append((s2_cand, eid, 0.99))
+
     print(f"[+] Successfully Indexed {len(records):,} Target Entities.")
     print(f"    Tax ID Anchors: {len(idx_tax):,} | Phone Anchors: {len(idx_phone):,} | Domains: {len(idx_domain):,}")
+    print(f"    Direct S2 <-> S3 Transitive Edges: {len(weighted_edges):,}")
 
     # 3. Stream S1 Entities and Collect Weighted Candidate Edges
     print("\n[3/5] Querying S1 Entities with Deterministic + GBDT Ensemble...")
     s1_path = os.path.join(DATA_DIR, "test_source1.tsv")
-    weighted_edges = [] # List of (u, v, score)
     cand_pairs_out = {} # s1_id -> list of candidates
 
     total_s1 = 0
@@ -120,7 +137,7 @@ def main():
             s1_id = row[0].strip()
             name = row[1].strip() if len(row) > 1 else ""
             addr = row[2].strip() if len(row) > 2 else ""
-            country = row[3].strip() if len(row) > 3 else ""
+            country = row[3].strip().lower() if len(row) > 3 else ""
             
             cn = clean_name(name)
             anchors = extract_all_deterministic_anchors(name, addr, country)
@@ -150,7 +167,7 @@ def main():
             # --- Multi-Key Blocking (Postal + Exact Clean Name) ---
             if 'POSTAL' in anchors:
                 cands.update(idx_postal.get((country, anchors['POSTAL']), [])[:8])
-            if cn in idx_exact_name:
+            if (country, cn) in idx_exact_name:
                 cands.update(idx_exact_name.get((country, cn), [])[:8])
                 
             cand_list = list(cands)
@@ -226,6 +243,7 @@ def main():
     # 6. Final Validation
     print("\nRunning Verification Validator...")
     os.system(f"python3 validate_dgx_tsv.py {OUT_MATCHING}")
+    os.system(f"python3 student_resource/utils/validate_submission.py -m {OUT_MATCHING} -c {OUT_CANDIDATE} -t student_resource/dataset/test")
     print(f"\n🎉 PHASE B+C+D GRANDMASTER PIPELINE COMPLETE: {OUT_MATCHING}")
 
 if __name__ == "__main__":

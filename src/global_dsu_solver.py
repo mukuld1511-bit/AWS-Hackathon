@@ -1,4 +1,4 @@
-﻿"""
+"""
 src/global_dsu_solver.py
 ========================
 Phase D: Global Disjoint-Set Union (DSU) & Optimal Bipartite Clamping
@@ -80,6 +80,24 @@ def solve_global_assignments(weighted_edges: List[Tuple[str, str, float]], min_t
         elif s2 and s3:
             dsu.union(s2, s3)
             # Check if this bridges an existing S1
+            if s2 in s2_to_s1:
+                linked_s1 = s2_to_s1[s2]
+                if linked_s1 not in s1_to_s3 and s3 not in s3_to_s1:
+                    s1_to_s3[linked_s1] = s3
+                    s3_to_s1[s3] = linked_s1
+            elif s3 in s3_to_s1:
+                linked_s1 = s3_to_s1[s3]
+                if linked_s1 not in s1_to_s2 and s2 not in s2_to_s1:
+                    s1_to_s2[linked_s1] = s2
+                    s2_to_s1[s2] = linked_s1
+
+    # Pass 2: Ensure order-independent transitive bridging for S2 <-> S3 links
+    for u, v, w in sorted_edges:
+        if w < min_threshold:
+            continue
+        s2 = u if u.startswith("S2-") else (v if v.startswith("S2-") else None)
+        s3 = u if u.startswith("S3-") else (v if v.startswith("S3-") else None)
+        if s2 and s3:
             if s2 in s2_to_s1:
                 linked_s1 = s2_to_s1[s2]
                 if linked_s1 not in s1_to_s3 and s3 not in s3_to_s1:
