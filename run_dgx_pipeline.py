@@ -1,16 +1,17 @@
 """
 DGX Fast High-Precision Entity Resolution Pipeline
-Accelerated via RapidFuzz, Multi-Attribute Blocking, and F0.5 Calibration.
-Targeting 0.90+ Macro F0.5 on Unstop Leaderboard.
+Targeting 0.90+ Macro F0.5
 """
 import os
 import re
 import csv
 import time
 import zipfile
+import numpy as np
 from collections import defaultdict
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, distance
 from tqdm import tqdm
+import xgboost as xgb
 
 DATA_DIR = "student_resource/dataset"
 OUTPUT_DIR = "output"
@@ -34,10 +35,27 @@ def extract_pin(s: str) -> str:
     m = DIGITS.findall(s)
     return m[0] if m else ""
 
+def extract_features(s1_name, s1_addr, s2_name, s2_addr):
+    features = []
+    features.append(fuzz.ratio(s1_name, s2_name))
+    features.append(fuzz.token_set_ratio(s1_name, s2_name))
+    features.append(fuzz.token_sort_ratio(s1_name, s2_name))
+    features.append(distance.JaroWinkler.normalized_similarity(s1_name, s2_name) * 100)
+    s1_addr_tokens = set(s1_addr.lower().split()) if s1_addr else set()
+    s2_addr_tokens = set(s2_addr.lower().split()) if s2_addr else set()
+    overlap = len(s1_addr_tokens & s2_addr_tokens)
+    features.append(overlap)
+    features.append(abs(len(s1_name) - len(s2_name)))
+    return features
+
 def main():
     print("="*70)
     print("🚀 STARTING DGX HIGH-PRECISION PIPELINE (TARGET: 0.90+)")
     print("="*70)
+
+    print("[*] Loading XGBoost Re-ranker Model...")
+    xgb_model = xgb.Booster()
+    xgb_model.load_model("xgb_reranker.json")
 
     # STEP 1: INDEX S2 AND S3 BY COUNTRY + NAME PREFIX + PINCODE
     print("[*] Indexing Target Records (S2 & S3)...")
@@ -59,7 +77,6 @@ def main():
                 pin = extract_pin(addr)
                 records[eid] = (cn, addr, country)
                 
-                # Country-partitioned keys
                 if cn:
                     idx_exact[(country, cn)].append(eid)
                     first_3 = cn[:3]
@@ -70,12 +87,12 @@ def main():
 
     print(f"[+] Loaded {len(records):,} target records.")
 
-    # STEP 2: PROCESS S1 ENTITIES & FUZZY RE-RANK
+    # STEP 2: PROCESS S1 ENTITIES & GBDT RE-RANK
     s1_path = os.path.join(DATA_DIR, "test", "test_source1.tsv")
     matching_file = os.path.join(OUTPUT_DIR, "matching_results.tsv")
     candidate_file = os.path.join(OUTPUT_DIR, "candidate_pairs.tsv")
 
-    print("[*] Matching S1 Entities with RAPIDFUZZ scoring...")
+    print("[*] Matching S1 Entities with XGBoost scoring...")
     matched_count = 0
     total_s1 = 0
 
@@ -92,70 +109,104 @@ def main():
         
         next(r_s1)
         
-        for row in tqdm(r_s1, total=1732544, desc="Processing S1"):
-            total_s1 += 1
-            s1_id = row[0].strip()
-            b_name = row[1].strip() if len(row) > 1 else ""
-            b_addr = row[2].strip() if len(row) > 2 else ""
-            country = row[3].strip() if len(row) > 3 else ""
+        # Batching logic for XGBoost speed
+        BATCH_SIZE = 5000
+        batch_s1 = []
+        
+        def process_batch(batch):
+            nonlocal matched_count, total_s1
             
-            cn = clean_name(b_name)
-            pin = extract_pin(b_addr)
+            # Extract features for all candidates in batch
+            feature_matrix = []
+            cand_refs = [] # List of (batch_idx, cid)
             
-            candidates = set()
-            
-            # 1. Exact Name Matches (Highest weight)
-            if (country, cn) in idx_exact:
-                candidates.update(idx_exact[(country, cn)][:15])
-            
-            # 2. Pincode Matches
-            if pin and (country, pin) in idx_pin:
-                candidates.update(idx_pin[(country, pin)][:15])
+            for b_idx, row in enumerate(batch):
+                total_s1 += 1
+                s1_id = row[0].strip()
+                b_name = row[1].strip() if len(row) > 1 else ""
+                b_addr = row[2].strip() if len(row) > 2 else ""
+                country = row[3].strip() if len(row) > 3 else ""
                 
-            # 3. First 3 chars prefix (if candidates count is small)
-            if len(candidates) < 5 and cn:
-                first_3 = cn[:3]
-                if (country, first_3) in idx_first3:
-                    candidates.update(idx_first3[(country, first_3)][:10])
-            
-            if not candidates:
-                w_m.writerow([s1_id, ""])
-                w_c.writerow([s1_id, ""])
-                continue
+                cn = clean_name(b_name)
+                pin = extract_pin(b_addr)
                 
-            w_c.writerow([s1_id, ",".join(candidates)])
-            
-            # SCORE CANDIDATES FOR F0.5 PRECISION
-            best_s2, best_s2_score = None, 0.0
-            best_s3, best_s3_score = None, 0.0
-            
-            for cid in candidates:
-                t_cn, t_addr, _ = records[cid]
-                # Rapid Token Set Ratio + Ratio
-                score = (fuzz.ratio(cn, t_cn) * 0.6) + (fuzz.token_set_ratio(cn, t_cn) * 0.4)
+                candidates = set()
+                if (country, cn) in idx_exact:
+                    candidates.update(idx_exact[(country, cn)][:15])
+                if pin and (country, pin) in idx_pin:
+                    candidates.update(idx_pin[(country, pin)][:15])
+                if len(candidates) < 5 and cn:
+                    first_3 = cn[:3]
+                    if (country, first_3) in idx_first3:
+                        candidates.update(idx_first3[(country, first_3)][:10])
+                        
+                cand_list = list(candidates)
+                if not cand_list:
+                    w_c.writerow([s1_id, ""])
+                    continue
+                    
+                w_c.writerow([s1_id, ",".join(cand_list)])
                 
+                for cid in cand_list:
+                    t_cn, t_addr, _ = records[cid]
+                    feats = extract_features(cn, b_addr, t_cn, t_addr)
+                    feature_matrix.append(feats)
+                    cand_refs.append((b_idx, cid))
+            
+            if not feature_matrix:
+                return
+                
+            # Predict batch
+            X = np.array(feature_matrix)
+            dmatrix = xgb.DMatrix(X)
+            probs = xgb_model.predict(dmatrix)
+            
+            # Map predictions back to S1 entities
+            best_s2 = [None] * len(batch)
+            best_s2_score = [0.0] * len(batch)
+            best_s3 = [None] * len(batch)
+            best_s3_score = [0.0] * len(batch)
+            
+            for i, prob in enumerate(probs):
+                b_idx, cid = cand_refs[i]
                 if cid.startswith("S2-"):
-                    if score > best_s2_score:
-                        best_s2_score = score
-                        best_s2 = cid
+                    if prob > best_s2_score[b_idx]:
+                        best_s2_score[b_idx] = prob
+                        best_s2[b_idx] = cid
                 elif cid.startswith("S3-"):
-                    if score > best_s3_score:
-                        best_s3_score = score
-                        best_s3 = cid
-            
-            # HIGH PRECISION THRESHOLD: Only accept if match score >= 85%
-            # Low scores are rejected as Singletons (Scores 1.0 in Macro F0.5)
-            final_matches = []
-            if best_s2 and best_s2_score >= 85.0:
-                final_matches.append(best_s2)
-            if best_s3 and best_s3_score >= 85.0:
-                final_matches.append(best_s3)
+                    if prob > best_s3_score[b_idx]:
+                        best_s3_score[b_idx] = prob
+                        best_s3[b_idx] = cid
+                        
+            # Write matches (Threshold 0.65 as per DGX Prompt)
+            for b_idx, row in enumerate(batch):
+                s1_id = row[0].strip()
+                final_matches = []
+                if best_s2[b_idx] and best_s2_score[b_idx] >= 0.65:
+                    final_matches.append(best_s2[b_idx])
+                if best_s3[b_idx] and best_s3_score[b_idx] >= 0.65:
+                    final_matches.append(best_s3[b_idx])
+                    
+                if final_matches:
+                    matched_count += 1
+                    w_m.writerow([s1_id, ",".join(final_matches)])
+                else:
+                    # If candidates existed but none passed 0.65 threshold
+                    if len(batch_s1[b_idx]) > 0:
+                        w_m.writerow([s1_id, ""])
+
+        pbar = tqdm(total=1732544, desc="Processing S1")
+        for row in r_s1:
+            batch_s1.append(row)
+            if len(batch_s1) >= BATCH_SIZE:
+                process_batch(batch_s1)
+                pbar.update(len(batch_s1))
+                batch_s1 = []
                 
-            if final_matches:
-                matched_count += 1
-                w_m.writerow([s1_id, ",".join(final_matches)])
-            else:
-                w_m.writerow([s1_id, ""])
+        if batch_s1:
+            process_batch(batch_s1)
+            pbar.update(len(batch_s1))
+        pbar.close()
 
     print(f"\n[+] Processing Completed!")
     print(f"[+] Total S1: {total_s1:,} | Matched: {matched_count:,} ({matched_count/total_s1*100:.2f}%)")
@@ -171,6 +222,9 @@ def main():
             z.write('requirements.txt', arcname='code/business_entity_resolution/requirements.txt')
         if os.path.exists('TEAM_INSTRUCTIONS.md'):
             z.write('TEAM_INSTRUCTIONS.md', arcname='code/business_entity_resolution/README.md')
+        # Also include the model
+        if os.path.exists('xgb_reranker.json'):
+            z.write('xgb_reranker.json', arcname='code/business_entity_resolution/xgb_reranker.json')
 
     print(f"[+] Created {code_zip} ({os.path.getsize(code_zip)} bytes)")
 
